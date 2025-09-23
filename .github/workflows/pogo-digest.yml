@@ -61,6 +61,10 @@ jobs:
       - name: Build wiki library
         run: python build_wiki_library.py
 
+      - name: Install Playwright browsers (Chromium only)
+        run: |
+          python -m playwright install --with-deps chromium
+
       # --- Scrapers (use your actual filenames) + sanity checks ---
       - name: Scrape PvE Attackers (ALL 18 TYPES)
         run: |

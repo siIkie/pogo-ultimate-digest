@@ -2,7 +2,8 @@ name: POGO Ultimate Pipeline
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # every 4 hours
+    # every 4 hours
+    - cron: "0 */4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,13 +13,58 @@ env:
   PUBLISH_GHPAGES: "false"
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.watch.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore feed state
+        id: restore
+        uses: actions/cache@v4
+        with:
+          path: .state
+          key: feed-state
+
+      - name: Watch sources (roots only)
+        id: watch
+        run: |
+          set -e
+          mkdir -p .state
+          curl -s https://pokemongolive.com/news/?format=rss -o .state/niantic.xml.new
+          curl -s https://leekduck.com/events/ -o .state/leek_events.html.new
+          curl -s https://leekduck.com/calendar/ -o .state/leek_cal.html.new
+          curl -s https://niantic.helpshift.com/a/pokemon-go/ -o .state/niantic_help.html.new
+          curl -s https://pokemongohub.net/category/guides/ -o .state/gohub_guides.html.new
+
+          CHANGED=false
+          for f in niantic.xml leek_events.html leek_cal.html niantic_help.html gohub_guides.html; do
+            if ! cmp -s ".state/$f" ".state/$f.new"; then
+              echo "Source $f changed"
+              mv ".state/$f.new" ".state/$f" || cp ".state/$f.new" ".state/$f"
+              CHANGED=true
+            else
+              rm ".state/$f.new"
+            fi
+          done
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Save feed state (only when changed)
+        if: steps.watch.outputs.changed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .state
+          key: feed-state-${{ github.run_id }}
+
   build:
+    needs: check
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       END: ${{ steps.dates.outputs.END }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -31,15 +77,15 @@ jobs:
           pip install -r requirements.txt
 
       - name: Add repo root to PYTHONPATH
-        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
       - name: Compute date range
         id: dates
         run: |
-          echo "START=2024-06-01" >> $GITHUB_OUTPUT
-          echo "END=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          echo "START=2024-06-01" >> "$GITHUB_OUTPUT"
+          echo "END=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      # --- SCRAPERS (keep all your existing scripts) ---
+      # ---------- Core library builders (events/features/balance/wiki) ----------
       - name: Build events
         run: python build_pogo_library.py
 
@@ -52,20 +98,21 @@ jobs:
       - name: Build wiki library
         run: python build_wiki_library.py
 
+      # --------------------------- Scrapers (single-file) -----------------------
       - name: Scrape PvE Attackers (ALL 18 TYPES)
-        run: python scrapers/pve_attackers.py
+        run: python scrapers/attackers_pve.py
 
       - name: Scrape PvP Rankings (PvPoke)
-        run: python scrapers/pvp_rankings.py
+        run: python scrapers/pvp_pvpoke.py
 
-      - name: Scrape External Events & Raid Bosses (Niantic RSS / sites)
+      - name: Scrape External Events & Raid Bosses (Niantic/LeekDuck)
         run: python scrapers/events_external.py
 
       - name: Scrape Field Research (LeekDuck)
-        run: python scrapers/research_leekduck.py
+        run: python scrapers/research.py
 
       - name: Scrape Egg Pools (LeekDuck)
-        run: python scrapers/eggs_leekduck.py
+        run: python scrapers/eggs.py
 
       - name: Scrape Shiny Availability
         run: python scrapers/shinies.py
@@ -73,7 +120,33 @@ jobs:
       - name: Scrape Items & Bonuses (Niantic Help)
         run: python scrapers/items_bonuses.py
 
-      # --- ENRICH / NORMALIZE / BUNDLES / EXPORTS ---
+      # --------------------------- Sanity checks -------------------------------
+      - name: Sanity check scraped outputs
+        run: |
+          set -e
+          py='import json,sys; import os
+def load(p):
+    with open(p,"r",encoding="utf-8") as f: return json.load(f)
+def assert_min(path, min_n, label):
+    if not os.path.exists(path):
+        print(f"[FAIL] missing {label}: {path}"); sys.exit(2)
+    data = load(path)
+    n = len(data) if isinstance(data, list) else (len(data.get("rows",[])) if isinstance(data, dict) else 0)
+    print(f"[OK] {label}: {n} rows at {path}")
+    assert n >= min_n, f\"{label} too small ({n} < {min_n})\"
+assert_min("pogo_library/events/index.json", 20, "events")
+assert_min("pogo_library/features/index.json", 5, "features")
+assert_min("pogo_library/balance/index.json", 1, "balance")
+assert_min("pogo_library/wiki/index.json", 5, "wiki")
+assert_min("pogo_library/attackers/index.json", 18, "pve attackers (types)")
+assert_min("pogo_library/pvp/index.json", 10, "pvp rankings")
+assert_min("pogo_library/research/index.json", 10, "field research")
+assert_min("pogo_library/eggs/index.json", 5, "egg pools")
+assert_min("pogo_library/shinies/index.json", 20, "shinies")
+assert_min("pogo_library/items/index.json", 5, "items/bonuses")'
+          python -c "$py"
+
+      # --------------------- Enrichment / normalization / export ----------------
       - name: Enrich & normalize
         run: |
           python tools/extract_slots.py
@@ -88,35 +161,35 @@ jobs:
       - name: Export API endpoints (static JSON)
         run: python api/export_endpoints.py
 
-      - name: Build master bundle (JSON + NDJSON)
+      # --------------------- Master bundle + Artifacts --------------------------
+      - name: Build master bundle
         run: python build_master.py
 
       - name: Create ZIP bundle
         run: |
-          cd dist
           zip -r master.zip \
-            master.json master.ndjson \
-            POGO_Digest.xlsx POGO_Digest.csv POGO_Digest.json POGO_Events.ics \
-            api pogo_library
+            master.json \
+            pogo_library \
+            api \
+            POGO_Digest.xlsx POGO_Digest.csv POGO_Digest.json POGO_Events.ics
 
-      # --- ARTIFACTS ---
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: POGO_${{ steps.dates.outputs.END }}
           path: |
-            dist/master.json
-            dist/master.ndjson
-            dist/master.zip
-            dist/POGO_Digest.xlsx
-            dist/POGO_Digest.csv
-            dist/POGO_Digest.json
-            dist/POGO_Events.ics
-            dist/api/*.json
-            dist/pogo_library/**/*
+            master.json
+            master.zip
+            POGO_Digest.xlsx
+            POGO_Digest.csv
+            POGO_Digest.json
+            POGO_Events.ics
+            pogo_library/**/*
+            api/*.json
 
   release:
     needs: build
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Download artifact
@@ -125,19 +198,14 @@ jobs:
           name: POGO_${{ needs.build.outputs.END }}
           path: dist
 
-      # OPTION A: unique tag per run to avoid replace/delete problems
       - name: Create/Update Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: pogo-dataset-${{ needs.build.outputs.END }}-${{ github.run_id }}
-          name: "POGO Dataset ${{ needs.build.outputs.END }} (run ${{ github.run_number }})"
-          body: "Automated dataset build (events, features, balance, wiki, PvE/PvP, indices, API, bundles)."
-          make_latest: true
-          preserve_order: true
-          fail_on_unmatched_files: false
+          tag_name: pogo-dataset-${{ needs.build.outputs.END }}
+          name: "POGO Dataset ${{ needs.build.outputs.END }}"
+          body: "Automated dataset build (events, features, balance, wiki, scrapers, API snapshots)."
           files: |
             dist/master.json
-            dist/master.ndjson
             dist/master.zip
             dist/POGO_Digest.xlsx
             dist/POGO_Digest.csv
@@ -145,5 +213,7 @@ jobs:
             dist/POGO_Events.ics
             dist/api/*.json
             dist/pogo_library/**/*
+          make_latest: true
+          preserve_order: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

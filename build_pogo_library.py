@@ -12,39 +12,46 @@ def categorize_event(title: str) -> str:
 def parse_event_sources(cfg):
     rows = []
     for entry in cfg.get("events", []):
-        if not entry.get("enabled", True): 
+        if not entry.get("enabled", True):
             continue
         kind, url, name = entry.get("kind"), entry.get("url"), entry.get("name")
-        if kind == "rss":
-            xml = http_get(url)
-            for it in rss_items(xml):
-                title = it["title"]
-                rows.append({
-                    "Start Date": to_date(it["pubDate"]),
-                    "End Date": to_date(it["pubDate"]),
-                    "Event Name": title,
-                    "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": categorize_event(title),
-                    "Source": name,
-                    "Source URL": it["link"]
-                })
-        elif kind == "html":
-            html = http_get(url)
-            soup = soup_html(html)
-            seen = set()
-            for node in soup.select("h1, h2, h3, a, .event, .card, .post, .item"):
-                t = norm_whitespace(node.get_text(" ", strip=True))
-                if not t or len(t) < 5: continue
-                key = t.lower()
-                if key in seen: continue
-                seen.add(key)
-                rows.append({
-                    "Start Date": "",
-                    "End Date": "",
-                    "Event Name": t,
-                    "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": categorize_event(t),
-                    "Source": name,
-                    "Source URL": url
-                })
+        try:
+            if kind == "rss":
+                xml = http_get(url)
+                for it in rss_items(xml):
+                    title = it["title"]
+                    rows.append({
+                        "Start Date": to_date(it["pubDate"]),
+                        "End Date": to_date(it["pubDate"]),
+                        "Event Name": title,
+                        "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": categorize_event(title),
+                        "Source": name,
+                        "Source URL": it["link"]
+                    })
+            elif kind == "html":
+                html = http_get(url)
+                soup = soup_html(html)
+                seen = set()
+                for node in soup.select("h1, h2, h3, a, .event, .card, .post, .item"):
+                    t = norm_whitespace(node.get_text(" ", strip=True))
+                    if not t or len(t) < 5: 
+                        continue
+                    key = t.lower()
+                    if key in seen: 
+                        continue
+                    seen.add(key)
+                    rows.append({
+                        "Start Date": "",
+                        "End Date": "",
+                        "Event Name": t,
+                        "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": categorize_event(t),
+                        "Source": name,
+                        "Source URL": url
+                    })
+            # unknown kinds are ignored
+        except Exception:
+            # skip bad/404 sources and continue
+            continue
     return rows
 
 def write_event_outputs(rows):

@@ -11,8 +11,7 @@ permissions:
   contents: write
 
 env:
-  # set to "true" only if you want the workflow to publish api/ to gh-pages
-  PUBLISH_GHPAGES: "false"
+  PUBLISH_GHPAGES: "false"  # set to "true" only if you publish api/ to gh-pages
 
 jobs:
   check:
@@ -76,7 +75,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt || true
+          # Ensure scraper deps even if not listed yet
+          pip install requests beautifulsoup4 lxml
 
       - name: Add repo root to PYTHONPATH
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
@@ -87,6 +88,9 @@ jobs:
           echo "START=2024-06-01" >> $GITHUB_OUTPUT
           echo "END=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
+      # -------------------------------
+      # Core library build
+      # -------------------------------
       - name: Build events
         run: python build_pogo_library.py
 
@@ -99,6 +103,38 @@ jobs:
       - name: Build wiki library
         run: python build_wiki_library.py
 
+      # -------------------------------
+      # External scrapers (maximize coverage, skip gracefully if pages change)
+      # -------------------------------
+      - name: Scrape PvE Attackers (ALL 18 TYPES)
+        run: |
+          python scrapers/pve_attackers.py -o outputs/attackers.json \
+            --types normal,fire,water,grass,electric,ice,fighting,poison,ground,flying,psychic,bug,rock,ghost,dragon,dark,steel,fairy
+
+      - name: Scrape PvP Rankings (PvPoke: all leagues + common cups)
+        run: |
+          python scrapers/pvp_rankings.py -o outputs/pvp.json \
+            --leagues little,great,ultra,master \
+            --cups overall,remix,fantasy,element,love,halloween,jungle,kanto,johto,hoenn,hisui
+
+      - name: Scrape External Events & Raid Bosses (LeekDuck)
+        run: python scrapers/events_external.py -o outputs/events_external.json
+
+      - name: Scrape Field Research (LeekDuck)
+        run: python scrapers/research_tasks.py -o outputs/research.json
+
+      - name: Scrape Egg Pools (LeekDuck)
+        run: python scrapers/egg_pools.py -o outputs/eggs.json
+
+      - name: Scrape Shiny Availability (Primary + Fallback)
+        run: python scrapers/shinies.py -o outputs/shinies.json
+
+      - name: Scrape Items & Bonuses (Niantic Help + Static seed)
+        run: python scrapers/items.py -o outputs/items.json
+
+      # -------------------------------
+      # Enrichment and exports
+      # -------------------------------
       - name: Enrich & normalize
         run: |
           python tools/extract_slots.py
@@ -113,10 +149,61 @@ jobs:
       - name: Export API endpoints (static JSON)
         run: python api/export_endpoints.py
 
-      # >>> NEW: build one big bundle from everything <<<
-      - name: Build master bundle
-        run: python api/build_master.py
-      # ^ This writes api/master.json and api/master.ndjson
+      # -------------------------------
+      # Augment master bundle with new scraper outputs (no need to edit build_master.py yet)
+      # -------------------------------
+      - name: Merge scraper outputs into master.json
+        run: |
+          python - <<'PY'
+          import json, os
+          def read(p):
+              if os.path.exists(p):
+                  with open(p,"r",encoding="utf-8") as f:
+                      return json.load(f)
+              return None
+          os.makedirs("api", exist_ok=True)
+          master = read("api/master.json") or {"_meta": {"note": "created by workflow"}, "events": [], "features": [], "balance": [], "wiki": []}
+          attackers = read("outputs/attackers.json") or {}
+          pvp       = read("outputs/pvp.json") or {}
+          ext_evt   = read("outputs/events_external.json") or {}
+          research  = read("outputs/research.json") or {}
+          eggs      = read("outputs/eggs.json") or {}
+          shinies   = read("outputs/shinies.json") or {}
+          items     = read("outputs/items.json") or {}
+
+          if "attackers" in attackers: master["attackers"] = attackers["attackers"]
+          if "rankings" in pvp:        master["pvp"]       = pvp["rankings"]
+          if "events" in ext_evt:      master["events_external"] = ext_evt["events"]
+          if "raid_bosses" in ext_evt: master["raid_bosses"]     = ext_evt["raid_bosses"]
+          if "tasks" in research:      master["research"]  = research["tasks"]
+          if "pools" in eggs:          master["eggs"]      = eggs["pools"]
+          if "shinies" in shinies:     master["shinies"]   = shinies["shinies"]
+          if "items" in items:         master["items"]     = items["items"]
+
+          with open("api/master.json","w",encoding="utf-8") as f:
+              json.dump(master, f, ensure_ascii=False, indent=2)
+          print("[ok] master.json augmented with scraper outputs")
+          PY
+
+      # -------------------------------
+      # Create a ZIP bundle for convenience
+      # -------------------------------
+      - name: Create ZIP bundle
+        run: |
+          mkdir -p dist bundle/all
+          # Copy everything we ship
+          cp -r POGO_Digest.xlsx POGO_Digest.csv POGO_Digest.json POGO_Events.ics bundle/all/ 2>/dev/null || true
+          mkdir -p bundle/all/pogo_library/events bundle/all/pogo_library/features bundle/all/pogo_library/balance bundle/all/pogo_library/wiki
+          cp -r pogo_library/events/index.json pogo_library/events/index.ndjson bundle/all/pogo_library/events/ 2>/dev/null || true
+          cp -r pogo_library/features/index.json pogo_library/features/index.ndjson bundle/all/pogo_library/features/ 2>/dev/null || true
+          cp -r pogo_library/balance/index.json pogo_library/balance/index.ndjson bundle/all/pogo_library/balance/ 2>/dev/null || true
+          cp -r pogo_library/wiki/index.json bundle/all/pogo_library/wiki/ 2>/dev/null || true
+          mkdir -p bundle/all/api
+          cp -r api/events.json api/events_upcoming_30d.json api/features.json api/balance.json api/wiki.json api/master.json api/master.ndjson bundle/all/api/ 2>/dev/null || true
+          mkdir -p bundle/all/outputs
+          cp -r outputs/attackers.json outputs/pvp.json outputs/events_external.json outputs/research.json outputs/eggs.json outputs/shinies.json outputs/items.json bundle/all/outputs/ 2>/dev/null || true
+          (cd bundle && zip -r POGO_${{ steps.dates.outputs.END }}.zip all)
+          mv bundle/POGO_${{ steps.dates.outputs.END }}.zip dist/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -147,6 +234,14 @@ jobs:
             api/wiki.json
             api/master.json
             api/master.ndjson
+            outputs/attackers.json
+            outputs/pvp.json
+            outputs/events_external.json
+            outputs/research.json
+            outputs/eggs.json
+            outputs/shinies.json
+            outputs/items.json
+            dist/POGO_${{ steps.dates.outputs.END }}.zip
 
   release:
     needs: build
@@ -164,7 +259,8 @@ jobs:
         with:
           tag_name: pogo-dataset-${{ needs.build.outputs.END }}
           name: "POGO Dataset ${{ needs.build.outputs.END }}"
-          body: "Automated events + features + balance + wiki + API snapshots + master bundle."
+          body: "Automated events + features + balance + wiki + external scrapers (PvE/PvP/events/bosses/research/eggs/shinies/items) + master bundle and ZIP."
+          overwrite: true
           files: |
             dist/POGO_Digest.xlsx
             dist/POGO_Digest.csv
@@ -190,5 +286,13 @@ jobs:
             dist/api/wiki.json
             dist/api/master.json
             dist/api/master.ndjson
+            dist/outputs/attackers.json
+            dist/outputs/pvp.json
+            dist/outputs/events_external.json
+            dist/outputs/research.json
+            dist/outputs/eggs.json
+            dist/outputs/shinies.json
+            dist/outputs/items.json
+            dist/POGO_${{ needs.build.outputs.END }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -4,9 +4,7 @@
   "title": "Pokémon GO Events",
   "description": "Schema for normalized event rows used across CSV/JSON/Excel/ICS generation.",
   "type": "object",
-
   "additionalProperties": true,
-
   "properties": {
     "Start Date": {
       "description": "Event start date in YYYY-MM-DD (may be missing for undated entries).",
@@ -46,7 +44,6 @@
       "type": "string",
       "format": "uri"
     },
-
     "Has Valid Dates": {
       "description": "Computed flag indicating whether Start/End are present/usable for calendar outputs.",
       "type": ["boolean", "string"],
@@ -56,18 +53,16 @@
       "description": "How dates were interpreted for this row.",
       "type": "string",
       "enum": [
-        "ok",          // start & end valid
-        "single",      // start valid, end missing → single-day
-        "end_only",    // end valid, start missing → use end for both
-        "missing",     // neither could be parsed
+        "ok",
+        "single",
+        "end_only",
+        "missing",
         "failed-parse",
-        "inferred"     // if you later add inference heuristics
+        "inferred"
       ]
     }
   },
-
   "required": ["Event Name"],
-
   "examples": [
     {
       "Start Date": "2025-09-23",

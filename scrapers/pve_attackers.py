@@ -11,6 +11,8 @@ Resilient PvE attacker scraper with the following fetch order:
 Writes both:
   - outputs/attackers.json
   - pogo_library/attackers/index.json
+
+Fails CI if the final "attackers" list has fewer than 50 entries.
 """
 
 from __future__ import annotations
@@ -96,10 +98,8 @@ def fetch_with_playwright(url: str, referer: Optional[str] = None) -> Optional[s
                 extra_http_headers={**DEFAULT_HEADERS, **({"Referer": referer} if referer else {})},
             )
             page = context.new_page()
-            # request interception: occasionally helps reduce bot flags
             page.route("**/*", lambda route: route.continue_())
             page.goto(url, wait_until="networkidle", timeout=DEFAULT_TIMEOUT * 1000)
-            # Gentle scroll to trigger lazy loaders
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             page.wait_for_timeout(600)
             html = page.content()
@@ -675,6 +675,7 @@ def main():
         "attackers": [as_dict(r) for r in unique_rows],
     }
 
+    # Write files first, then sanity-check so artifacts exist for debugging
     out_path = args.out
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
@@ -685,6 +686,11 @@ def main():
     alt_path = os.path.join(alt_dir, "index.json")
     with open(alt_path, "w", encoding="utf-8") as f2:
         json.dump(payload, f2, ensure_ascii=False, indent=2)
+
+    # --- sanity check (correct JSON shape) ---
+    attackers = payload.get("attackers", [])
+    if not isinstance(attackers, list) or len(attackers) < 50:
+        raise AssertionError(f"attackers too small: {len(attackers) if isinstance(attackers, list) else 'NA'}")
 
     print(f"[ok] Wrote {out_path} and {alt_path} with {len(unique_rows)} unique rows")
 

@@ -1,8 +1,16 @@
-pandas==2.2.2
-openpyxl==3.1.5
-requests==2.32.3
-beautifulsoup4==4.12.3
-lxml==5.2.2
-PyYAML==6.0.2
-python-dateutil==2.9.0.post0
-jsonschema==4.23.0
+# Core scraping / parsing
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+lxml>=4.9.3
+feedparser>=6.0.11
+
+# Data wrangling & outputs
+pandas>=2.1.0
+openpyxl>=3.1.2
+python-dateutil>=2.8.2
+
+# Validation
+jsonschema>=4.21.1
+
+# Timezones (often useful downstream)
+pytz>=2023.3

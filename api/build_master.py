@@ -2,38 +2,51 @@
 # -*- coding: utf-8 -*-
 
 """
-Builds a single "master" bundle from all useful repo outputs so you can upload
-just one file (or point an external consumer at one URL).
+Builds a single "master" bundle from all useful repo outputs so you can publish
+one canonical artifact for humans and machines.
 
 Outputs:
-  - api/master.json     (one big JSON dict)
+  - api/master.json     (single nested JSON)
   - api/master.ndjson   (line-delimited objects for streaming / RAG)
 
-What it tries to collect (all optional; missing files are skipped):
-  API snapshots:
+This script is intentionally comprehensive. It includes:
+  API snapshots (internal):
     - api/events.json
     - api/events_upcoming_30d.json
     - api/features.json
     - api/balance.json
     - api/wiki.json
 
-  Canonical tables (CSV/JSON):
+  Canonical tables:
     - POGO_Digest.json / POGO_Digest.csv
-    - POGO_Balance.json / POGO_Balance.csv
     - POGO_Features.json / POGO_Features.csv
+    - POGO_Balance.json / POGO_Balance.csv
     - POGO_Wiki_Library.json
 
-  Libraries & indices (for RAG / auditing):
-    - pogo_library/events/index.json, index.ndjson
-    - pogo_library/features/index.json, index.ndjson
-    - pogo_library/balance/index.json, index.ndjson
-    - pogo_library/wiki/index.json, index.ndjson
+  Libraries & indices:
+    - pogo_library/events/index.{json,ndjson}
+    - pogo_library/features/index.{json,ndjson}
+    - pogo_library/balance/index.{json,ndjson}
+    - pogo_library/wiki/index.{json,ndjson}
 
-  Calendar (raw ICS text and a simple file hash)
-    - POGO_Events.ics
+  Calendar:
+    - POGO_Events.ics (raw text + file metadata)
+
+  External scrapers (outputs/*.json):
+    - outputs/attackers.json         -> bundle["attackers"]
+    - outputs/pvp.json               -> bundle["pvp"]
+    - outputs/events_external.json   -> bundle["events_external"], bundle["raid_bosses"]
+    - outputs/research.json          -> bundle["research"]
+    - outputs/eggs.json              -> bundle["eggs"]
+    - outputs/shinies.json           -> bundle["shinies"]
+    - outputs/items.json             -> bundle["items"]
+
+It also records NDJSON index file metadata and a lightweight _summary of counts.
 """
 
-import os, json, csv, hashlib, time
+from __future__ import annotations
+
+import os, json, csv, hashlib, time, sys
 from typing import Any, Dict, List, Optional
 
 # ---------- helpers
@@ -50,35 +63,47 @@ def read_text(path: str) -> Optional[str]:
 def load_json(path: str) -> Optional[Any]:
     if not os.path.isfile(path):
         return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[warn] load_json failed for {path}: {e}", file=sys.stderr)
+        return None
 
 def load_csv(path: str) -> Optional[List[Dict[str, Any]]]:
     if not os.path.isfile(path):
         return None
-    rows: List[Dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(dict(row))
-    return rows
+    try:
+        rows: List[Dict[str, Any]] = []
+        with open(path, "r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rows.append(dict(row))
+        return rows
+    except Exception as e:
+        print(f"[warn] load_csv failed for {path}: {e}", file=sys.stderr)
+        return None
 
 def file_info(path: str) -> Optional[Dict[str, Any]]:
     if not os.path.isfile(path):
         return None
-    st = os.stat(path)
-    sha = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            sha.update(chunk)
-    return {
-        "path": path,
-        "size_bytes": st.st_size,
-        "sha256": sha.hexdigest(),
-        "modified": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime)),
-    }
+    try:
+        st = os.stat(path)
+        sha = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                sha.update(chunk)
+        return {
+            "path": path,
+            "size_bytes": st.st_size,
+            "sha256": sha.hexdigest(),
+            "modified": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime)),
+        }
+    except Exception as e:
+        print(f"[warn] file_info failed for {path}: {e}", file=sys.stderr)
+        return None
 
-def first_of(*candidates: str) -> Optional[str]:
+def first_existing(*candidates: str) -> Optional[str]:
     for p in candidates:
         if os.path.isfile(p):
             return p
@@ -109,71 +134,99 @@ def collect_bundle() -> Dict[str, Any]:
 
     bundle: Dict[str, Any] = {"_meta": root_meta}
 
-    # API snapshots
-    add_if_present(bundle, "api_events",             load_json("api/events.json"))
-    add_if_present(bundle, "api_events_upcoming_30d",load_json("api/events_upcoming_30d.json"))
-    add_if_present(bundle, "api_features",           load_json("api/features.json"))
-    add_if_present(bundle, "api_balance",            load_json("api/balance.json"))
-    add_if_present(bundle, "api_wiki",               load_json("api/wiki.json"))
+    # Internal API snapshots
+    add_if_present(bundle, "api_events",              load_json("api/events.json"))
+    add_if_present(bundle, "api_events_upcoming_30d", load_json("api/events_upcoming_30d.json"))
+    add_if_present(bundle, "api_features",            load_json("api/features.json"))
+    add_if_present(bundle, "api_balance",             load_json("api/balance.json"))
+    add_if_present(bundle, "api_wiki",                load_json("api/wiki.json"))
 
-    # Canonical tables (JSON beats CSV; CSV used as fallback)
-    # Events (digest)
-    events_json = load_json("POGO_Digest.json")
-    if events_json is None:
-        events_json = load_csv("POGO_Digest.csv")
-    add_if_present(bundle, "table_events", events_json)
+    # Canonical tables (prefer JSON; CSV fallback)
+    ev = load_json("POGO_Digest.json") or load_csv("POGO_Digest.csv")
+    add_if_present(bundle, "table_events", ev)
 
-    # Features
-    feats_json = load_json("POGO_Features.json")
-    if feats_json is None:
-        feats_json = load_csv("POGO_Features.csv")
-    add_if_present(bundle, "table_features", feats_json)
+    feats = load_json("POGO_Features.json") or load_csv("POGO_Features.csv")
+    add_if_present(bundle, "table_features", feats)
 
-    # Balance
-    balance_json = load_json("POGO_Balance.json")
-    if balance_json is None:
-        balance_json = load_csv("POGO_Balance.csv")
-    add_if_present(bundle, "table_balance", balance_json)
+    bal = load_json("POGO_Balance.json") or load_csv("POGO_Balance.csv")
+    add_if_present(bundle, "table_balance", bal)
 
-    # Wiki library (JSON only)
     add_if_present(bundle, "table_wiki_library", load_json("POGO_Wiki_Library.json"))
 
-    # RAG-friendly libraries (JSON lists + we keep pointers to NDJSON files)
+    # RAG-friendly libraries
     add_if_present(bundle, "lib_events",   load_json("pogo_library/events/index.json"))
     add_if_present(bundle, "lib_features", load_json("pogo_library/features/index.json"))
     add_if_present(bundle, "lib_balance",  load_json("pogo_library/balance/index.json"))
     add_if_present(bundle, "lib_wiki",     load_json("pogo_library/wiki/index.json"))
 
-    # NDJSON file metadata (so a downstream consumer can fetch them if needed)
+    # NDJSON index metadata
     ndjson_meta = {
-        "events":  file_info("pogo_library/events/index.ndjson"),
-        "features":file_info("pogo_library/features/index.ndjson"),
-        "balance": file_info("pogo_library/balance/index.ndjson"),
-        "wiki":    file_info("pogo_library/wiki/index.ndjson"),
+        "events":   file_info("pogo_library/events/index.ndjson"),
+        "features": file_info("pogo_library/features/index.ndjson"),
+        "balance":  file_info("pogo_library/balance/index.ndjson"),
+        "wiki":     file_info("pogo_library/wiki/index.ndjson"),
     }
-    # Only add keys that exist
     ndjson_meta = {k: v for k, v in ndjson_meta.items() if v is not None}
     if ndjson_meta:
         bundle["ndjson_indices"] = ndjson_meta
 
-    # Calendar: raw ICS text + a file hash (we don’t parse ICS here to avoid extra deps)
-    ics_path = first_of("POGO_Events.ics", "outputs/latest/POGO_Events.ics")
+    # Calendar (raw + info)
+    ics_path = first_existing("POGO_Events.ics", "outputs/latest/POGO_Events.ics")
     if ics_path:
         add_if_present(bundle, "calendar_ics", read_text(ics_path))
         add_if_present(bundle, "calendar_ics_info", file_info(ics_path))
 
+    # ---------- NEW external outputs ----------
+    # Attackers (PvE)
+    attackers = load_json("outputs/attackers.json")
+    if isinstance(attackers, dict) and "attackers" in attackers:
+        bundle["attackers"] = attackers["attackers"]
+
+    # PvP
+    pvp = load_json("outputs/pvp.json")
+    if isinstance(pvp, dict) and "rankings" in pvp:
+        bundle["pvp"] = pvp["rankings"]
+
+    # External events & raid bosses
+    ext = load_json("outputs/events_external.json")
+    if isinstance(ext, dict):
+        if "events" in ext:       bundle["events_external"] = ext["events"]
+        if "raid_bosses" in ext:  bundle["raid_bosses"]     = ext["raid_bosses"]
+
+    # Research tasks
+    research = load_json("outputs/research.json")
+    if isinstance(research, dict) and "tasks" in research:
+        bundle["research"] = research["tasks"]
+
+    # Egg pools
+    eggs = load_json("outputs/eggs.json")
+    if isinstance(eggs, dict) and "pools" in eggs:
+        bundle["eggs"] = eggs["pools"]
+
+    # Shiny availability
+    shinies = load_json("outputs/shinies.json")
+    if isinstance(shinies, dict) and "shinies" in shinies:
+        bundle["shinies"] = shinies["shinies"]
+
+    # Items & bonuses
+    items = load_json("outputs/items.json")
+    if isinstance(items, dict) and "items" in items:
+        bundle["items"] = items["items"]
+
     # Lightweight summary counts
     summary = {}
-    for key in ("api_events","api_events_upcoming_30d","api_features","api_balance","api_wiki",
-                "table_events","table_features","table_balance","table_wiki_library",
-                "lib_events","lib_features","lib_balance","lib_wiki"):
+    def count_list(key: str):
         val = bundle.get(key)
         if isinstance(val, list):
             summary[key + "_count"] = len(val)
-        elif isinstance(val, dict):
-            # common API shapes use {"data": [...]}
-            if "data" in val and isinstance(val["data"], list):
-                summary[key + "_count"] = len(val["data"])
+    for key in (
+        "api_events", "api_events_upcoming_30d", "api_features", "api_balance", "api_wiki",
+        "table_events", "table_features", "table_balance", "table_wiki_library",
+        "lib_events", "lib_features", "lib_balance", "lib_wiki",
+        "attackers", "pvp", "events_external", "raid_bosses",
+        "research", "eggs", "shinies", "items"
+    ):
+        count_list(key)
     if summary:
         bundle["_summary"] = summary
 
@@ -183,18 +236,19 @@ def collect_bundle() -> Dict[str, Any]:
 
 def write_outputs(bundle: Dict[str, Any]) -> None:
     ensure_dir("api")
+
     # master.json
     with open("api/master.json", "w", encoding="utf-8") as f:
         json.dump(bundle, f, ensure_ascii=False, indent=2)
 
-    # master.ndjson: flatten into several streams that are likely useful for search/RAG
+    # master.ndjson
     records: List[Dict[str, Any]] = []
     def push(stream: str, item: Dict[str, Any]) -> None:
         rec = dict(item)
         rec["_stream"] = stream
         records.append(rec)
 
-    # choose common lists if present
+    # Primary tables (cleaner)
     if isinstance(bundle.get("table_events"), list):
         for r in bundle["table_events"]:
             push("events", r)
@@ -208,7 +262,7 @@ def write_outputs(bundle: Dict[str, Any]) -> None:
         for r in bundle["table_wiki_library"]:
             push("wiki", r)
 
-    # also include lib_* (usually richer but noisier)
+    # Libraries (richer/noisier)
     if isinstance(bundle.get("lib_events"), list):
         for r in bundle["lib_events"]:
             push("lib_events", r)
@@ -221,6 +275,32 @@ def write_outputs(bundle: Dict[str, Any]) -> None:
     if isinstance(bundle.get("lib_wiki"), list):
         for r in bundle["lib_wiki"]:
             push("lib_wiki", r)
+
+    # NEW external scrapers
+    if isinstance(bundle.get("attackers"), list):
+        for r in bundle["attackers"]:
+            push("attackers", r)
+    if isinstance(bundle.get("pvp"), list):
+        for r in bundle["pvp"]:
+            push("pvp", r)
+    if isinstance(bundle.get("events_external"), list):
+        for r in bundle["events_external"]:
+            push("events_external", r)
+    if isinstance(bundle.get("raid_bosses"), list):
+        for r in bundle["raid_bosses"]:
+            push("raid_bosses", r)
+    if isinstance(bundle.get("research"), list):
+        for r in bundle["research"]:
+            push("research", r)
+    if isinstance(bundle.get("eggs"), list):
+        for r in bundle["eggs"]:
+            push("eggs", r)
+    if isinstance(bundle.get("shinies"), list):
+        for r in bundle["shinies"]:
+            push("shinies", r)
+    if isinstance(bundle.get("items"), list):
+        for r in bundle["items"]:
+            push("items", r)
 
     ndjson_dump("api/master.ndjson", records)
 

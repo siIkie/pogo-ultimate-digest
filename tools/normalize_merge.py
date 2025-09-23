@@ -227,9 +227,24 @@ def validate_against_schema(rows: List[Dict[str, Any]], schema_path: str) -> Non
     with open(schema_path, "r", encoding="utf-8") as f:
         schema = json.load(f)
 
-    # Validate array of objects using the single-item schema
     import jsonschema
-    jsonschema.validate(instance=rows, schema={"type": "array", "items": schema})
+    try:
+        jsonschema.validate(instance=rows, schema={"type": "array", "items": schema})
+    except Exception as e:
+        # Print more detail to logs to speed up debugging
+        print("Error:  Schema validation failed. Exception message:", file=sys.stderr)
+        print(repr(e), file=sys.stderr)
+        # Try to find and print the first offending row if possible
+        try:
+            from jsonschema import Draft202012Validator
+            v = Draft202012Validator({"type": "array", "items": schema})
+            for idx, err in enumerate(v.iter_errors(rows)):
+                print(f"First error at item index {err.path[0] if err.path else 'unknown'}:", file=sys.stderr)
+                print(err.message, file=sys.stderr)
+                break
+        except Exception:
+            pass
+        raise
 
 
 def save_events(rows: List[Dict[str, Any]]) -> None:
@@ -249,16 +264,7 @@ def main():
     rows: List[Dict[str, Any]] = df.to_dict(orient="records")
 
     if os.path.exists(SCHEMA_PATH):
-        try:
-            validate_against_schema(rows, SCHEMA_PATH)
-            print(f"[ok] Schema validation passed for {len(rows)} rows.")
-        except Exception:
-            print("Error:  Schema validation failed. First offending row:", file=sys.stderr)
-            try:
-                print(json.dumps(rows[0], ensure_ascii=False, indent=2), file=sys.stderr)
-            except Exception:
-                pass
-            raise
+        validate_against_schema(rows, SCHEMA_PATH)
 
     save_events(rows)
 

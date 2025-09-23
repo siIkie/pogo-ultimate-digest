@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POGO Egg Pools",
+  "type": "object",
+  "properties": {
+    "_meta": { "type": "object" },
+    "pools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "distance_km": { "type": "number" },
+          "category": { "type": "string" },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pokemon": { "type": "string" },
+                "form": { "type": "string" },
+                "shiny": { "type": ["boolean", "null"] },
+                "rarity": { "type": ["string", "null"] },
+                "notes": { "type": "string" }
+              },
+              "required": ["pokemon"],
+              "additionalProperties": true
+            }
+          },
+          "source": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$" }
+        },
+        "required": ["distance_km", "entries", "source"],
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": ["pools"],
+  "additionalProperties": true
+}

@@ -1,60 +1,83 @@
-events:
-  - name: niantic_rss
-    kind: rss
-    url: "https://pokemongolive.com/news/?format=rss"
-    enabled: true
-  - name: leekduck_events
-    kind: html
-    url: "https://leekduck.com/events/"
-    enabled: true
-  - name: leekduck_calendar
-    kind: html
-    url: "https://leekduck.com/calendar/"
-    enabled: true
+# build_pogo_library.py
+import os, json, yaml, pandas as pd
+from common.utils import http_get, rss_items, to_date, norm_title, norm_whitespace, soup_html, dedupe_by_key, save_json, save_ndjson
 
-features:
-  - name: niantic_news
-    kind: rss
-    url: "https://pokemongolive.com/news/?format=rss"
-    enabled: true
-    feature_keywords:
-      - "introducing"
-      - "new feature"
-      - "now available"
-      - "coming soon"
-      - "trainers can now"
-      - "launching"
-      - "new way"
-      - "feature update"
-      - "feature rollout"
-      - "companion update"
+def categorize_event(title: str) -> str:
+    t = (title or "").lower()
+    if "community day" in t: return "Community Day"
+    if "spotlight hour" in t: return "Spotlight"
+    if "raid hour" in t or "raid day" in t or "5-star raid" in t or "mega" in t or "shadow raid" in t: return "Raid/Mega"
+    if "research" in t or "field research" in t: return "Research"
+    return "Event/News"
 
-balance:
-  - name: niantic_news
-    kind: rss
-    url: "https://pokemongolive.com/news/?format=rss"
-    enabled: true
-    balance_keywords:
-      - "balance update"
-      - "adjustments"
-      - "nerf"
-      - "buff"
-      - "cp update"
-      - "move update"
-      - "move rebalance"
-      - "stat change"
-      - "combat update"
-      - "pvp update"
-      - "gbl changes"
+def parse_event_sources(cfg):
+    rows = []
+    for entry in cfg.get("events", []):
+        if not entry.get("enabled", True):
+            continue
+        kind, url, name = entry.get("kind"), entry.get("url"), entry.get("name")
+        try:
+            if kind == "rss":
+                xml = http_get(url)
+                for it in rss_items(xml):
+                    title = it["title"]
+                    rows.append({
+                        "Start Date": to_date(it["pubDate"]),
+                        "End Date": to_date(it["pubDate"]),
+                        "Event Name": title,
+                        "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": categorize_event(title),
+                        "Source": name,
+                        "Source URL": it["link"]
+                    })
+            elif kind == "html":
+                html = http_get(url)
+                soup = soup_html(html)
+                seen = set()
+                for node in soup.select("h1, h2, h3, a, .event, .card, .post, .item"):
+                    t = norm_whitespace(node.get_text(" ", strip=True))
+                    if not t or len(t) < 5: 
+                        continue
+                    key = t.lower()
+                    if key in seen: 
+                        continue
+                    seen.add(key)
+                    rows.append({
+                        "Start Date": "",
+                        "End Date": "",
+                        "Event Name": t,
+                        "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": categorize_event(t),
+                        "Source": name,
+                        "Source URL": url
+                    })
+            else:
+                # Unknown kind – ignore gracefully
+                continue
+        except Exception as e:
+            print(f"[warn] Skipping source '{name}' ({url}): {e}")
+            continue
+    return rows
 
-wiki:
-  - name: niantic_help_center
-    kind: html
-    url: "https://niantic.helpshift.com/a/pokemon-go/"
-    enabled: true
-    allow: ["Tips", "How to", "FAQ", "Guide"]
-  - name: gohub_guides
-    kind: html
-    url: "https://pokemongohub.net/category/guides/"
-    enabled: true
-    allow: ["Guide", "Tips", "Best", "How to"]
+def write_event_outputs(rows):
+    rows = dedupe_by_key(rows, lambda r: norm_title(r.get("Event Name","")))
+    rows.sort(key=lambda r: (r.get("Start Date") or "", r.get("Event Name") or ""))
+
+    os.makedirs("pogo_library/events", exist_ok=True)
+    save_json("pogo_library/events/index.json", rows)
+    save_ndjson("pogo_library/events/index.ndjson", rows)
+
+    df = pd.DataFrame(rows)
+    df.to_csv("POGO_Digest.csv", index=False)
+    with open("POGO_Digest.json","w",encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+
+    with pd.ExcelWriter("POGO_Digest.xlsx", engine="openpyxl") as xw:
+        df.to_excel(xw, sheet_name="Events", index=False)
+
+def main():
+    with open("sources/sources.yaml", "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    rows = parse_event_sources(cfg)
+    write_event_outputs(rows)
+
+if __name__ == "__main__":
+    main()

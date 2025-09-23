@@ -2,14 +2,17 @@ name: POGO Ultimate Pipeline
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # every 4 hours
+    # every 4 hours
+    - cron: "0 */4 * * *"
   workflow_dispatch:
+  pull_request:
 
 permissions:
   contents: write
 
 env:
-  PUBLISH_GHPAGES: "false"       # set to "true" to push api/ to gh-pages branch
+  # set to "true" only if you want the workflow to publish api/ to gh-pages
+  PUBLISH_GHPAGES: "false"
 
 jobs:
   check:
@@ -58,7 +61,7 @@ jobs:
 
   build:
     needs: check
-    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       END: ${{ steps.dates.outputs.END }}
@@ -75,10 +78,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Make repo root importable so 'common.utils' works in all scripts
       - name: Add repo root to PYTHONPATH
-        shell: bash
-        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
 
       - name: Compute date range
         id: dates
@@ -112,6 +113,11 @@ jobs:
       - name: Export API endpoints (static JSON)
         run: python api/export_endpoints.py
 
+      # >>> NEW: build one big bundle from everything <<<
+      - name: Build master bundle
+        run: python api/build_master.py
+      # ^ This writes api/master.json and api/master.ndjson
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -120,7 +126,6 @@ jobs:
             POGO_Digest.xlsx
             POGO_Digest.csv
             POGO_Digest.json
-            POGO_Digest_undated.json
             POGO_Events.ics
             POGO_Features.csv
             POGO_Features.json
@@ -140,10 +145,12 @@ jobs:
             api/features.json
             api/balance.json
             api/wiki.json
+            api/master.json
+            api/master.ndjson
 
   release:
     needs: build
-    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Download artifact
@@ -157,12 +164,11 @@ jobs:
         with:
           tag_name: pogo-dataset-${{ needs.build.outputs.END }}
           name: "POGO Dataset ${{ needs.build.outputs.END }}"
-          body: "Automated events + features + balance + wiki + API snapshots."
+          body: "Automated events + features + balance + wiki + API snapshots + master bundle."
           files: |
             dist/POGO_Digest.xlsx
             dist/POGO_Digest.csv
             dist/POGO_Digest.json
-            dist/POGO_Digest_undated.json
             dist/POGO_Events.ics
             dist/POGO_Features.csv
             dist/POGO_Features.json
@@ -182,5 +188,7 @@ jobs:
             dist/api/features.json
             dist/api/balance.json
             dist/api/wiki.json
+            dist/api/master.json
+            dist/api/master.ndjson
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

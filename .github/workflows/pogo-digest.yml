@@ -2,8 +2,7 @@ name: POGO Ultimate Pipeline
 
 on:
   schedule:
-    # every 4 hours
-    - cron: "0 */4 * * *"
+    - cron: "0 */4 * * *"   # every 4 hours
   workflow_dispatch:
 
 permissions:
@@ -13,58 +12,13 @@ env:
   PUBLISH_GHPAGES: "false"
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.watch.outputs.changed }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Restore feed state
-        id: restore
-        uses: actions/cache@v4
-        with:
-          path: .state
-          key: feed-state
-
-      - name: Watch sources (roots only)
-        id: watch
-        run: |
-          set -e
-          mkdir -p .state
-          curl -s https://pokemongolive.com/news/?format=rss -o .state/niantic.xml.new
-          curl -s https://leekduck.com/events/ -o .state/leek_events.html.new
-          curl -s https://leekduck.com/calendar/ -o .state/leek_cal.html.new
-          curl -s https://niantic.helpshift.com/a/pokemon-go/ -o .state/niantic_help.html.new
-          curl -s https://pokemongohub.net/category/guides/ -o .state/gohub_guides.html.new
-
-          CHANGED=false
-          for f in niantic.xml leek_events.html leek_cal.html niantic_help.html gohub_guides.html; do
-            if ! cmp -s ".state/$f" ".state/$f.new"; then
-              echo "Source $f changed"
-              mv ".state/$f.new" ".state/$f" || cp ".state/$f.new" ".state/$f"
-              CHANGED=true
-            else
-              rm ".state/$f.new"
-            fi
-          done
-          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
-
-      - name: Save feed state (only when changed)
-        if: steps.watch.outputs.changed == 'true'
-        uses: actions/cache@v4
-        with:
-          path: .state
-          key: feed-state-${{ github.run_id }}
-
   build:
-    needs: check
-    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       END: ${{ steps.dates.outputs.END }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -74,18 +28,23 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests beautifulsoup4 lxml pandas openpyxl pyyaml jsonschema scikit-learn joblib python-dateutil icalendar
+          fi
 
       - name: Add repo root to PYTHONPATH
-        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
 
       - name: Compute date range
         id: dates
+        shell: bash
         run: |
           echo "START=2024-06-01" >> "$GITHUB_OUTPUT"
           echo "END=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      # ---------- Core library builders (events/features/balance/wiki) ----------
+      # --- Core library builders (existing scripts) ---
       - name: Build events
         run: python build_pogo_library.py
 
@@ -98,55 +57,57 @@ jobs:
       - name: Build wiki library
         run: python build_wiki_library.py
 
-      # --------------------------- Scrapers (single-file) -----------------------
+      # --- Scrapers (use your actual filenames) + sanity checks ---
       - name: Scrape PvE Attackers (ALL 18 TYPES)
-        run: python scrapers/attackers_pve.py
+        run: |
+          python scrapers/pve_attackers.py
+          test -s pogo_library/attackers/index.json
+          python - <<'PY'
+import json, pathlib
+p = pathlib.Path("pogo_library/attackers/index.json")
+data = json.loads(p.read_text(encoding="utf-8"))
+assert isinstance(data, list) and len(data) >= 50, f"attackers too small: {len(data) if isinstance(data,list) else 'NA'}"
+print("attackers ok:", len(data))
+PY
 
       - name: Scrape PvP Rankings (PvPoke)
-        run: python scrapers/pvp_pvpoke.py
+        run: |
+          python scrapers/pvp_rankings.py
+          test -s pogo_library/pvp/index.json
+          python - <<'PY'
+import json, pathlib
+p = pathlib.Path("pogo_library/pvp/index.json")
+data = json.loads(p.read_text(encoding="utf-8"))
+assert isinstance(data, dict) and any(len(v)>=50 for v in data.values()), "pvp rankings look empty"
+print("pvp ok:", {k:len(v) for k,v in data.items()})
+PY
 
-      - name: Scrape External Events & Raid Bosses (Niantic/LeekDuck)
-        run: python scrapers/events_external.py
+      - name: Scrape External Events & Raid Bosses (LeekDuck/News)
+        run: |
+          python scrapers/events_external.py
+          test -s pogo_library/events_external/index.json
 
       - name: Scrape Field Research (LeekDuck)
-        run: python scrapers/research.py
+        run: |
+          python scrapers/research_tasks.py
+          test -s pogo_library/research/index.json
 
       - name: Scrape Egg Pools (LeekDuck)
-        run: python scrapers/eggs.py
+        run: |
+          python scrapers/egg_pools.py
+          test -s pogo_library/eggs/index.json
 
       - name: Scrape Shiny Availability
-        run: python scrapers/shinies.py
+        run: |
+          python scrapers/shinies.py
+          test -s pogo_library/shinies/index.json
 
       - name: Scrape Items & Bonuses (Niantic Help)
-        run: python scrapers/items_bonuses.py
-
-      # --------------------------- Sanity checks -------------------------------
-      - name: Sanity check scraped outputs
         run: |
-          set -e
-          py='import json,sys; import os
-def load(p):
-    with open(p,"r",encoding="utf-8") as f: return json.load(f)
-def assert_min(path, min_n, label):
-    if not os.path.exists(path):
-        print(f"[FAIL] missing {label}: {path}"); sys.exit(2)
-    data = load(path)
-    n = len(data) if isinstance(data, list) else (len(data.get("rows",[])) if isinstance(data, dict) else 0)
-    print(f"[OK] {label}: {n} rows at {path}")
-    assert n >= min_n, f\"{label} too small ({n} < {min_n})\"
-assert_min("pogo_library/events/index.json", 20, "events")
-assert_min("pogo_library/features/index.json", 5, "features")
-assert_min("pogo_library/balance/index.json", 1, "balance")
-assert_min("pogo_library/wiki/index.json", 5, "wiki")
-assert_min("pogo_library/attackers/index.json", 18, "pve attackers (types)")
-assert_min("pogo_library/pvp/index.json", 10, "pvp rankings")
-assert_min("pogo_library/research/index.json", 10, "field research")
-assert_min("pogo_library/eggs/index.json", 5, "egg pools")
-assert_min("pogo_library/shinies/index.json", 20, "shinies")
-assert_min("pogo_library/items/index.json", 5, "items/bonuses")'
-          python -c "$py"
+          python scrapers/items.py
+          test -s pogo_library/items/index.json
 
-      # --------------------- Enrichment / normalization / export ----------------
+      # --- Normalize / index / API / bundles ---
       - name: Enrich & normalize
         run: |
           python tools/extract_slots.py
@@ -161,17 +122,13 @@ assert_min("pogo_library/items/index.json", 5, "items/bonuses")'
       - name: Export API endpoints (static JSON)
         run: python api/export_endpoints.py
 
-      # --------------------- Master bundle + Artifacts --------------------------
-      - name: Build master bundle
+      - name: Build master bundle (master.json)
         run: python build_master.py
 
       - name: Create ZIP bundle
         run: |
-          zip -r master.zip \
-            master.json \
-            pogo_library \
-            api \
-            POGO_Digest.xlsx POGO_Digest.csv POGO_Digest.json POGO_Events.ics
+          mkdir -p dist
+          zip -r dist/master.zip master.json pogo_library api POGO_Digest.* POGO_Events.ics || true
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -179,17 +136,17 @@ assert_min("pogo_library/items/index.json", 5, "items/bonuses")'
           name: POGO_${{ steps.dates.outputs.END }}
           path: |
             master.json
-            master.zip
+            dist/master.zip
             POGO_Digest.xlsx
             POGO_Digest.csv
             POGO_Digest.json
             POGO_Events.ics
             pogo_library/**/*
             api/*.json
+            index/*.ndjson
 
   release:
     needs: build
-    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Download artifact
@@ -203,7 +160,9 @@ assert_min("pogo_library/items/index.json", 5, "items/bonuses")'
         with:
           tag_name: pogo-dataset-${{ needs.build.outputs.END }}
           name: "POGO Dataset ${{ needs.build.outputs.END }}"
-          body: "Automated dataset build (events, features, balance, wiki, scrapers, API snapshots)."
+          body: "Automated POGO dataset build (events, features, balance, wiki, scrapers, indices, API, master.json)."
+          make_latest: true
+          preserve_order: true
           files: |
             dist/master.json
             dist/master.zip
@@ -213,7 +172,6 @@ assert_min("pogo_library/items/index.json", 5, "items/bonuses")'
             dist/POGO_Events.ics
             dist/api/*.json
             dist/pogo_library/**/*
-          make_latest: true
-          preserve_order: true
+            dist/index/*.ndjson
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

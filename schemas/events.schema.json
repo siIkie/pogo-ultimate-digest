@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "POGO Event Schema",
-  "description": "Schema for validating Pokémon GO event data",
+  "description": "Schema for validating Pokémon GO event data (flexible Category).",
   "type": "object",
   "properties": {
     "Start Date": {
@@ -18,9 +18,20 @@
       "type": "string",
       "description": "Full name of the event"
     },
+
+    /*
+      IMPORTANT CHANGE:
+      - Category is now any non-empty string (no enum), so we don't fail when new labels appear.
+      - We also support an optional 'Category Normalized' that CAN be an enum if present.
+    */
     "Category": {
       "type": "string",
-      "description": "Type of event",
+      "minLength": 1,
+      "description": "Human/Source label for event type (free-form: e.g., 'Community Day', 'Raid Hour', 'Event/News')"
+    },
+    "Category Normalized": {
+      "type": "string",
+      "description": "Stable bucket derived by our pipeline; optional",
       "enum": [
         "CD",
         "CD Classic",
@@ -33,6 +44,7 @@
         "Event/News"
       ]
     },
+
     "Source": {
       "type": "string",
       "description": "Origin of the event listing"
@@ -42,6 +54,12 @@
       "description": "Direct link to the source",
       "format": "uri"
     },
+    "Sources": {
+      "type": "array",
+      "description": "List of raw sources contributing to this row",
+      "items": { "type": "string" }
+    },
+
     "Featured": {
       "type": ["string", "null"],
       "description": "Main Pokémon or feature highlighted (nullable)"
@@ -54,21 +72,11 @@
       "type": ["string", "null"],
       "description": "Region or scope of the event (nullable)"
     },
-    "Sources": {
-      "type": "array",
-      "description": "List of raw sources contributing to this row",
-      "items": { "type": "string" }
-    },
+
     "Date Parse Status": {
       "type": "string",
       "description": "Status of date parsing for this row",
-      "enum": [
-        "parsed",
-        "missing",
-        "inferred",
-        "invalid",
-        ""
-      ]
+      "enum": ["parsed", "missing", "inferred", "invalid", ""]
     },
     "Date Inference Confidence": {
       "type": "string",
@@ -83,6 +91,7 @@
       "description": "True if Start Date is valid, false otherwise"
     }
   },
+
   "required": [
     "Start Date",
     "Event Name",
@@ -92,5 +101,6 @@
     "Sources",
     "Has Valid Dates"
   ],
+
   "additionalProperties": true
 }

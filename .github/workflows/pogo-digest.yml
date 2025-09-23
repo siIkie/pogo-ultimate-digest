@@ -62,7 +62,7 @@ jobs:
         run: |
           python scrapers/pve_attackers.py
           test -s pogo_library/attackers/index.json
-          python - <<'PY'
+          python <<'PY'
 import json, pathlib
 p = pathlib.Path("pogo_library/attackers/index.json")
 data = json.loads(p.read_text(encoding="utf-8"))
@@ -74,7 +74,7 @@ PY
         run: |
           python scrapers/pvp_rankings.py
           test -s pogo_library/pvp/index.json
-          python - <<'PY'
+          python <<'PY'
 import json, pathlib
 p = pathlib.Path("pogo_library/pvp/index.json")
 data = json.loads(p.read_text(encoding="utf-8"))
@@ -156,13 +156,12 @@ PY
           path: dist
 
       - name: Create/Update Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: pogo-dataset-${{ needs.build.outputs.END }}
           name: "POGO Dataset ${{ needs.build.outputs.END }}"
           body: "Automated POGO dataset build (events, features, balance, wiki, scrapers, indices, API, master.json)."
           make_latest: true
-          preserve_order: true
           files: |
             dist/master.json
             dist/master.zip

@@ -227,7 +227,7 @@ jobs:
           tag_name: pogo-dataset-${{ needs.build.outputs.END }}
           name: "POGO Dataset ${{ needs.build.outputs.END }}"
           body: "Automated dataset: core + scrapers + master bundle + ZIP."
-          overwrite: true
+          overwrite_files: true
           files: |
             dist/POGO_Digest.xlsx
             dist/POGO_Digest.csv

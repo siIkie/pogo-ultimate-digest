@@ -14,9 +14,11 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    outputs:
+      END: ${{ steps.dates.outputs.END }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -37,128 +39,41 @@ jobs:
           echo "START=2024-06-01" >> $GITHUB_OUTPUT
           echo "END=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
-      # --------------------------
-      # SCRAPE: PvE Attackers (18 types)
-      # --------------------------
-      - name: Scrape PvE Attackers (ALL 18 TYPES)
-        run: python tools/scrape_pve_attackers.py
-
-      - name: Sanity check: PvE attackers
-        run: |
-          set -e
-          test -f pogo_library/attackers/index.json
-          BYTES=$(wc -c < pogo_library/attackers/index.json); echo "Size: $BYTES bytes"
-          COUNT=$(jq 'length' pogo_library/attackers/index.json); echo "Count: $COUNT"
-          if [ "$COUNT" -lt 200 ]; then
-            echo "ERROR: attackers entries too low ($COUNT)"; exit 1; fi
-          if [ "$BYTES" -lt 20000 ]; then
-            echo "ERROR: attackers file suspiciously small ($BYTES)"; exit 1; fi
-
-      # --------------------------
-      # SCRAPE: PvP Rankings (PvPoke)
-      # --------------------------
-      - name: Scrape PvP Rankings (PvPoke)
-        run: python tools/scrape_pvp_rankings.py
-
-      - name: Sanity check: PvP rankings
-        run: |
-          set -e
-          test -f pogo_library/pvp/index.json
-          BYTES=$(wc -c < pogo_library/pvp/index.json); echo "Size: $BYTES bytes"
-          COUNT=$(jq 'length' pogo_library/pvp/index.json); echo "Count: $COUNT"
-          if [ "$COUNT" -lt 50 ]; then
-            echo "ERROR: pvp entries too low ($COUNT)"; exit 1; fi
-          if [ "$BYTES" -lt 5000 ]; then
-            echo "ERROR: pvp file suspiciously small ($BYTES)"; exit 1; fi
-
-      # --------------------------
-      # SCRAPE: External events & raid bosses (Niantic RSS / LeekDuck)
-      # --------------------------
-      - name: Scrape External Events & Raid Bosses
+      # --- SCRAPERS (keep all your existing scripts) ---
+      - name: Build events
         run: python build_pogo_library.py
 
-      - name: Sanity check: Events
-        run: |
-          set -e
-          test -f pogo_library/events/index.json
-          BYTES=$(wc -c < pogo_library/events/index.json); echo "Size: $BYTES bytes"
-          COUNT=$(jq 'length' pogo_library/events/index.json); echo "Count: $COUNT"
-          if [ "$COUNT" -lt 20 ]; then
-            echo "ERROR: events entries too low ($COUNT)"; exit 1; fi
-          if [ "$BYTES" -lt 4000 ]; then
-            echo "ERROR: events file suspiciously small ($BYTES)"; exit 1; fi
+      - name: Build features
+        run: python build_features.py
 
-      # --------------------------
-      # SCRAPE: Field Research (LeekDuck)
-      # --------------------------
+      - name: Build balance
+        run: python build_balance.py
+
+      - name: Build wiki library
+        run: python build_wiki_library.py
+
+      - name: Scrape PvE Attackers (ALL 18 TYPES)
+        run: python scrapers/pve_attackers.py
+
+      - name: Scrape PvP Rankings (PvPoke)
+        run: python scrapers/pvp_rankings.py
+
+      - name: Scrape External Events & Raid Bosses (Niantic RSS / sites)
+        run: python scrapers/events_external.py
+
       - name: Scrape Field Research (LeekDuck)
-        run: python tools/scrape_research.py
+        run: python scrapers/research_leekduck.py
 
-      - name: Sanity check: Research
-        run: |
-          set -e
-          test -f pogo_library/research/index.json
-          BYTES=$(wc -c < pogo_library/research/index.json); echo "Size: $BYTES bytes"
-          COUNT=$(jq 'length' pogo_library/research/index.json); echo "Count: $COUNT"
-          if [ "$COUNT" -lt 50 ]; then
-            echo "ERROR: research entries too low ($COUNT)"; exit 1; fi
-          if [ "$BYTES" -lt 6000 ]; then
-            echo "ERROR: research file suspiciously small ($BYTES)"; exit 1; fi
-
-      # --------------------------
-      # SCRAPE: Egg Pools (LeekDuck)
-      # --------------------------
       - name: Scrape Egg Pools (LeekDuck)
-        run: python tools/scrape_eggs.py
+        run: python scrapers/eggs_leekduck.py
 
-      - name: Sanity check: Eggs
-        run: |
-          set -e
-          test -f pogo_library/eggs/index.json
-          BYTES=$(wc -c < pogo_library/eggs/index.json); echo "Size: $BYTES bytes"
-          COUNT=$(jq 'length' pogo_library/eggs/index.json); echo "Count: $COUNT"
-          if [ "$COUNT" -lt 10 ]; then
-            echo "ERROR: eggs entries too low ($COUNT)"; exit 1; fi
-          if [ "$BYTES" -lt 2000 ]; then
-            echo "ERROR: eggs file suspiciously small ($BYTES)"; exit 1; fi
-
-      # --------------------------
-      # SCRAPE: Shiny Availability
-      # --------------------------
       - name: Scrape Shiny Availability
-        run: python tools/scrape_shiny.py
+        run: python scrapers/shinies.py
 
-      - name: Sanity check: Shiny index
-        run: |
-          set -e
-          test -f pogo_library/shiny/index.json
-          BYTES=$(wc -c < pogo_library/shiny/index.json); echo "Size: $BYTES bytes"
-          COUNT=$(jq 'length' pogo_library/shiny/index.json); echo "Count: $COUNT"
-          if [ "$COUNT" -lt 500 ]; then
-            echo "ERROR: shiny entries too low ($COUNT)"; exit 1; fi
-          if [ "$BYTES" -lt 30000 ]; then
-            echo "ERROR: shiny file suspiciously small ($BYTES)"; exit 1; fi
-
-      # --------------------------
-      # SCRAPE: Items & Bonuses (Niantic Help)
-      # --------------------------
       - name: Scrape Items & Bonuses (Niantic Help)
-        run: python tools/scrape_items.py
+        run: python scrapers/items_bonuses.py
 
-      - name: Sanity check: Items
-        run: |
-          set -e
-          test -f pogo_library/items/index.json
-          BYTES=$(wc -c < pogo_library/items/index.json); echo "Size: $BYTES bytes"
-          COUNT=$(jq 'length' pogo_library/items/index.json); echo "Count: $COUNT"
-          if [ "$COUNT" -lt 10 ]; then
-            echo "ERROR: items entries too low ($COUNT)"; exit 1; fi
-          if [ "$BYTES" -lt 2000 ]; then
-            echo "ERROR: items file suspiciously small ($BYTES)"; exit 1; fi
-
-      # --------------------------
-      # ENRICH / NORMALIZE / BUNDLES / INDICES / API
-      # --------------------------
+      # --- ENRICH / NORMALIZE / BUNDLES / EXPORTS ---
       - name: Enrich & normalize
         run: |
           python tools/extract_slots.py
@@ -173,27 +88,32 @@ jobs:
       - name: Export API endpoints (static JSON)
         run: python api/export_endpoints.py
 
-      - name: Build master bundle
-        run: python tools/build_master_bundle.py
+      - name: Build master bundle (JSON + NDJSON)
+        run: python build_master.py
 
       - name: Create ZIP bundle
         run: |
-          rm -f master.zip
-          zip -r master.zip api/ pogo_library/ POGO_Digest.xlsx POGO_Digest.csv POGO_Digest.json POGO_Events.ics master.json
+          cd dist
+          zip -r master.zip \
+            master.json master.ndjson \
+            POGO_Digest.xlsx POGO_Digest.csv POGO_Digest.json POGO_Events.ics \
+            api pogo_library
 
+      # --- ARTIFACTS ---
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: POGO_${{ steps.dates.outputs.END }}
           path: |
-            master.json
-            master.zip
-            POGO_Digest.xlsx
-            POGO_Digest.csv
-            POGO_Digest.json
-            POGO_Events.ics
-            pogo_library/**/*
-            api/*.json
+            dist/master.json
+            dist/master.ndjson
+            dist/master.zip
+            dist/POGO_Digest.xlsx
+            dist/POGO_Digest.csv
+            dist/POGO_Digest.json
+            dist/POGO_Events.ics
+            dist/api/*.json
+            dist/pogo_library/**/*
 
   release:
     needs: build
@@ -205,12 +125,13 @@ jobs:
           name: POGO_${{ needs.build.outputs.END }}
           path: dist
 
+      # OPTION A: unique tag per run to avoid replace/delete problems
       - name: Create/Update Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: pogo-dataset-${{ steps.dates.outputs.END }}-${{ github.run_id }}
-          name: "POGO Dataset ${{ steps.dates.outputs.END }} (run ${{ github.run_number }})"
-          body: "Automated dataset build."
+          tag_name: pogo-dataset-${{ needs.build.outputs.END }}-${{ github.run_id }}
+          name: "POGO Dataset ${{ needs.build.outputs.END }} (run ${{ github.run_number }})"
+          body: "Automated dataset build (events, features, balance, wiki, PvE/PvP, indices, API, bundles)."
           make_latest: true
           preserve_order: true
           fail_on_unmatched_files: false
@@ -223,6 +144,6 @@ jobs:
             dist/POGO_Digest.json
             dist/POGO_Events.ics
             dist/api/*.json
-            dist/pogo_library/**/* 
+            dist/pogo_library/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

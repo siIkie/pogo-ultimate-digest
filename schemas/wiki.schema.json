@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Wiki",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["Title","Source URL"],
+    "properties": {
+      "Title": {"type": "string"},
+      "Category": {"type": ["string","null"]},
+      "Source": {"type": ["string","null"]},
+      "Source URL": {"type": "string"},
+      "Summary": {"type": ["string","null"]}
+    }
+  }
+}

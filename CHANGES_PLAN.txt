@@ -1,0 +1,91 @@
+Ultimate Pokémon GO Tool — Comprehensive Change Plan
+====================================================
+
+This plan enumerates all changes required to make the repo a robust, automated, RAG-ready Pokémon GO knowledge system.
+
+A) Data Ingestion & Coverage
+----------------------------
+1) Multi-source inputs (initial):
+   - Niantic News RSS (events, features, balance)
+   - LeekDuck Events page
+   - LeekDuck Calendar page
+   - Niantic Help Center (tips/how-tos/FAQ)
+   - Pokémon GO Hub Guides (general guides)
+2) Future sources (toggle on via YAML when allowed):
+   - PvPoke meta/moves (respect TOS), official X/Twitter (if API & TOS permit)
+   - Regional pages, mirrored announcements, community research archives
+3) Source abstraction:
+   - All URLs + hints live in `sources/sources.yaml`
+   - Toggle `enabled: true/false` per source, note fragility & selector hints
+4) HTTP hygiene:
+   - Custom UA, timeouts, simple caching, optional rate-limit/backoff
+   - Respect robots; only approved domains; minimize requests
+
+B) Parsing, Enrichment & Normalization
+--------------------------------------
+1) Parsers:
+   - RSS: title/link/description/pubDate
+   - HTML: resilient selectors for headings/cards/links
+2) Entity Registry (`data/entities.json`):
+   - Canonical Pokémon/forms/moves/types/leagues + aliases
+   - Used for normalization, query routing, counters
+3) Slot Extraction (`tools/extract_slots.py`):
+   - Pull or infer dates (ISO), featured label (CD/Raid Day/Spotlight), region (City Safari), bonuses (stub for future)
+4) Merge/Dedupe (`tools/normalize_merge.py`):
+   - Coalesce multi-source entries → one authoritative record, keep `Sources[]`
+5) Validation (schemas/*.json):
+   - Fail build on schema violations; clear error logs
+
+C) Outputs (for humans, agents, and apps)
+-----------------------------------------
+1) Human: CSV + Excel workbook; ICS calendar
+2) Machine: canonical JSON + NDJSON per domain (embedding-friendly)
+3) Static API JSON snapshots in `api/` (full + common slices like upcoming 30d)
+
+D) Retrieval (RAG) Layer
+------------------------
+1) Indices per domain (`index/build_indices.py`): TF‑IDF pipeline + matrix + rows.json
+2) Routing & Date Parsing (`index/route_query.py`): events/features/balance/wiki + datespan extraction
+3) Reranking (`index/rerank.py`): TF-IDF similarity × simple recency weight
+4) (Future) Alias-aware query normalization using `entities.json`
+
+E) Deterministic Helpers
+------------------------
+- `calc/type_effectiveness.py`: type chart (coarse but useful)
+- `calc/counters.py`: suggest attacking types vs boss types
+- `calc/dps.py`: simple DPS approximator (optional scaffold)
+
+F) CI/CD (GitHub Actions)
+-------------------------
+1) Jobs: check (watch changes) → build (scrape, enrich, validate, bundle, index, API) → release
+2) Permissions: `contents: write`; use `${{ secrets.GITHUB_TOKEN }}`
+3) Frequency: cron default every 15 minutes (tune lower for prod)
+4) Caching: `.cache/http` + actions/cache
+5) Resilience: continue building even if one source fails temporarily
+
+G) Quality of Life (QoL)
+------------------------
+- Single config in YAML, clear run report, dry-run mode (future), stable outputs in `outputs/latest/`
+- Optional `gh-pages` publishing for `api/*.json`
+- Consistent artifact names and release tags
+- Optional branch isolation (push outputs to a data-only branch)
+
+H) Governance & Safety
+----------------------
+- Keep `Source` + `Source URL` for audit/citations
+- Prefer exact dates; never guess when unknown
+- Respect site terms and be polite (cache, minimal requests)
+
+I) Extensibility
+----------------
+- Add source → edit YAML
+- Add alias/entity → edit JSON
+- Add new API slices → edit `api/export_endpoints.py`
+- Parser tweaks localized; rest of pipeline stays unchanged
+
+Success Criteria
+----------------
+- Fresh data on schedule (and on manual dispatch)
+- Outputs: CSV/JSON/NDJSON/ICS/Excel + API JSON
+- Retrieval returns relevant, recent, citable results
+- Minimal manual maintenance aside from source additions or selector fixes

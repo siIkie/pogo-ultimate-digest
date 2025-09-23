@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Balance",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["Change Title"],
+    "properties": {
+      "Date Announced": {"type": ["string","null"]},
+      "Change Title": {"type": "string"},
+      "Type": {"type": ["string","null"]},
+      "Summary": {"type": ["string","null"]},
+      "Source URL": {"type": ["string","null"]},
+      "Source": {"type": ["string","null"]}
+    }
+  }
+}

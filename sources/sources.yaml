@@ -1,0 +1,60 @@
+events:
+  - name: niantic_rss
+    kind: rss
+    url: "https://pokemongolive.com/news/?format=rss"
+    enabled: true
+  - name: leekduck_events
+    kind: html
+    url: "https://leekduck.com/events/"
+    enabled: true
+  - name: leekduck_calendar
+    kind: html
+    url: "https://leekduck.com/calendar/"
+    enabled: true
+
+features:
+  - name: niantic_news
+    kind: rss
+    url: "https://pokemongolive.com/news/?format=rss"
+    enabled: true
+    feature_keywords:
+      - "introducing"
+      - "new feature"
+      - "now available"
+      - "coming soon"
+      - "trainers can now"
+      - "launching"
+      - "new way"
+      - "feature update"
+      - "feature rollout"
+      - "companion update"
+
+balance:
+  - name: niantic_news
+    kind: rss
+    url: "https://pokemongolive.com/news/?format=rss"
+    enabled: true
+    balance_keywords:
+      - "balance update"
+      - "adjustments"
+      - "nerf"
+      - "buff"
+      - "cp update"
+      - "move update"
+      - "move rebalance"
+      - "stat change"
+      - "combat update"
+      - "pvp update"
+      - "gbl changes"
+
+wiki:
+  - name: niantic_help_center
+    kind: html
+    url: "https://niantic.helpshift.com/a/pokemon-go/"
+    enabled: true
+    allow: ["Tips", "How to", "FAQ", "Guide"]
+  - name: gohub_guides
+    kind: html
+    url: "https://pokemongohub.net/category/guides/"
+    enabled: true
+    allow: ["Guide", "Tips", "Best", "How to"]

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Events",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["Event Name"],
+    "properties": {
+      "Start Date": {"type": ["string","null"]},
+      "End Date": {"type": ["string","null"]},
+      "Event Name": {"type": "string"},
+      "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": {"type": ["string","null"]},
+      "Source": {"type": ["string","null"]},
+      "Source URL": {"type": ["string","null"]},
+      "Featured": {"type": ["string","null"]},
+      "Bonuses": {"type": ["string","null"]},
+      "Region": {"type": ["string","null"]},
+      "Sources": {"type": ["array","null"]}
+    }
+  }
+}

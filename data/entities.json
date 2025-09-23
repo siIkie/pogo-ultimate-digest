@@ -1,0 +1,259 @@
+{
+  "pokemon": [
+    {
+      "name": "Dialga (Origin Forme)",
+      "aliases": [
+        "Origin Forme Dialga",
+        "Origin Dialga",
+        "OG Dialga",
+        "Dialga Origin"
+      ],
+      "types": [
+        "Steel",
+        "Dragon"
+      ]
+    },
+    {
+      "name": "Dialga (Altered Forme)",
+      "aliases": [
+        "Altered Dialga"
+      ],
+      "types": [
+        "Steel",
+        "Dragon"
+      ]
+    },
+    {
+      "name": "Hoothoot",
+      "aliases": [
+        "Hoot Hoot"
+      ],
+      "types": [
+        "Normal",
+        "Flying"
+      ]
+    },
+    {
+      "name": "Aron",
+      "aliases": [],
+      "types": [
+        "Steel",
+        "Rock"
+      ]
+    },
+    {
+      "name": "Metagross",
+      "aliases": [],
+      "types": [
+        "Steel",
+        "Psychic"
+      ]
+    },
+    {
+      "name": "Kangaskhan",
+      "aliases": [
+        "Mega Kangaskhan"
+      ],
+      "types": [
+        "Normal"
+      ]
+    },
+    {
+      "name": "Lopunny",
+      "aliases": [
+        "Mega Lopunny"
+      ],
+      "types": [
+        "Normal"
+      ]
+    },
+    {
+      "name": "Gardevoir",
+      "aliases": [
+        "Mega Gardevoir"
+      ],
+      "types": [
+        "Fairy",
+        "Psychic"
+      ]
+    },
+    {
+      "name": "Camerupt",
+      "aliases": [
+        "Mega Camerupt"
+      ],
+      "types": [
+        "Fire",
+        "Ground"
+      ]
+    },
+    {
+      "name": "Steelix",
+      "aliases": [
+        "Mega Steelix"
+      ],
+      "types": [
+        "Steel",
+        "Ground"
+      ]
+    },
+    {
+      "name": "Scizor",
+      "aliases": [
+        "Mega Scizor"
+      ],
+      "types": [
+        "Bug",
+        "Steel"
+      ]
+    },
+    {
+      "name": "Lucario",
+      "aliases": [
+        "Mega Lucario"
+      ],
+      "types": [
+        "Fighting",
+        "Steel"
+      ]
+    },
+    {
+      "name": "Gallade",
+      "aliases": [
+        "Mega Gallade"
+      ],
+      "types": [
+        "Psychic",
+        "Fighting"
+      ]
+    },
+    {
+      "name": "Latias",
+      "aliases": [
+        "Mega Latias"
+      ],
+      "types": [
+        "Dragon",
+        "Psychic"
+      ]
+    },
+    {
+      "name": "Latios",
+      "aliases": [
+        "Mega Latios"
+      ],
+      "types": [
+        "Dragon",
+        "Psychic"
+      ]
+    },
+    {
+      "name": "Solosis",
+      "aliases": [],
+      "types": [
+        "Psychic"
+      ]
+    },
+    {
+      "name": "Chansey",
+      "aliases": [],
+      "types": [
+        "Normal"
+      ]
+    },
+    {
+      "name": "Beldum",
+      "aliases": [],
+      "types": [
+        "Steel",
+        "Psychic"
+      ]
+    }
+  ],
+  "moves": [
+    {
+      "name": "Meteor Mash",
+      "type": "Steel"
+    },
+    {
+      "name": "Aura Sphere",
+      "type": "Fighting"
+    },
+    {
+      "name": "Psystrike",
+      "type": "Psychic"
+    }
+  ],
+  "types": [
+    "Normal",
+    "Fire",
+    "Water",
+    "Electric",
+    "Grass",
+    "Ice",
+    "Fighting",
+    "Poison",
+    "Ground",
+    "Flying",
+    "Psychic",
+    "Bug",
+    "Rock",
+    "Ghost",
+    "Dragon",
+    "Dark",
+    "Steel",
+    "Fairy"
+  ],
+  "leagues": [
+    {
+      "name": "Great League",
+      "cp_cap": 1500,
+      "aliases": [
+        "GL"
+      ]
+    },
+    {
+      "name": "Ultra League",
+      "cp_cap": 2500,
+      "aliases": [
+        "UL"
+      ]
+    },
+    {
+      "name": "Master League",
+      "cp_cap": null,
+      "aliases": [
+        "ML"
+      ]
+    },
+    {
+      "name": "Master Premier",
+      "cp_cap": null,
+      "aliases": [
+        "Master Premier Classic",
+        "MPC"
+      ]
+    },
+    {
+      "name": "Fantasy Cup",
+      "cp_cap": 1500,
+      "aliases": [
+        "Fantasy Cup: Great League Edition"
+      ]
+    },
+    {
+      "name": "Halloween Cup",
+      "cp_cap": 1500,
+      "aliases": [
+        "Halloween Cup: Great League Edition"
+      ]
+    },
+    {
+      "name": "Willpower Cup",
+      "cp_cap": 1500,
+      "aliases": [
+        "Willpower Cup: Great League Edition"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+beautifulsoup4==4.12.3
+lxml==5.2.2
+pandas==2.2.2
+pyyaml==6.0.2
+requests==2.32.3
+python-dateutil==2.9.0
+icalendar==5.0.12
+openpyxl==3.1.5
+jsonschema==4.23.0
+scikit-learn==1.5.1
+joblib==1.4.2

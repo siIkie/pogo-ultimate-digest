@@ -1,0 +1,179 @@
+name: POGO Ultimate Pipeline
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 minutes (adjust for prod, e.g., '0 */2 * * *')
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PUBLISH_GHPAGES: "false"       # set to "true" to push api/ to gh-pages branch
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.watch.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore feed state
+        id: restore
+        uses: actions/cache@v4
+        with:
+          path: .state
+          key: feed-state
+
+      - name: Watch sources (RSS + Events + Wiki roots)
+        id: watch
+        run: |
+          set -e
+          mkdir -p .state
+          curl -s https://pokemongolive.com/news/?format=rss -o .state/niantic.xml.new
+          curl -s https://leekduck.com/events/ -o .state/leek_events.html.new
+          curl -s https://leekduck.com/calendar/ -o .state/leek_cal.html.new
+          curl -s https://niantic.helpshift.com/a/pokemon-go/ -o .state/niantic_help.html.new
+          curl -s https://pokemongohub.net/category/guides/ -o .state/gohub_guides.html.new
+
+          CHANGED=false
+          for f in niantic.xml leek_events.html leek_cal.html niantic_help.html gohub_guides.html; do
+            if ! cmp -s ".state/$f" ".state/$f.new"; then
+              echo "Source $f changed"
+              mv ".state/$f.new" ".state/$f" || cp ".state/$f.new" ".state/$f"
+              CHANGED=true
+            else
+              rm ".state/$f.new"
+            fi
+          done
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+
+      - name: Save feed state
+        if: steps.watch.outputs.changed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .state
+          key: feed-state-${{ github.run_id }}
+
+  build:
+    needs: check
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      END: ${{ steps.dates.outputs.END }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compute date range
+        id: dates
+        run: |
+          echo "START=2024-06-01" >> $GITHUB_OUTPUT
+          echo "END=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+      - name: Build events
+        run: python build_pogo_library.py
+
+      - name: Build features
+        run: python build_features.py
+
+      - name: Build balance
+        run: python build_balance.py
+
+      - name: Build wiki library
+        run: python build_wiki_library.py
+
+      - name: Enrich & normalize
+        run: |
+          python tools/extract_slots.py
+          python tools/normalize_merge.py
+
+      - name: Build ICS + Excel bundle
+        run: python digest_from_library.py
+
+      - name: Make NDJSON indices (for RAG)
+        run: python index/build_indices.py
+
+      - name: Export API endpoints (static JSON)
+        run: python api/export_endpoints.py
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: POGO_${{ steps.dates.outputs.END }}
+          path: |
+            POGO_Digest.xlsx
+            POGO_Digest.csv
+            POGO_Digest.json
+            POGO_Events.ics
+            POGO_Features.csv
+            POGO_Features.json
+            POGO_Balance.csv
+            POGO_Balance.json
+            POGO_Wiki_Library.json
+            pogo_library/events/index.json
+            pogo_library/events/index.ndjson
+            pogo_library/features/index.json
+            pogo_library/features/index.ndjson
+            pogo_library/balance/index.json
+            pogo_library/balance/index.ndjson
+            pogo_library/wiki/index.json
+            pogo_library/wiki/index.ndjson
+            api/events.json
+            api/events_upcoming_30d.json
+            api/features.json
+            api/balance.json
+            api/wiki.json
+
+  release:
+    needs: build
+    if: needs.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: POGO_${{ needs.build.outputs.END }}
+          path: dist
+
+      - name: Create/Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pogo-dataset-${{ needs.build.outputs.END }}
+          name: "POGO Dataset ${{ needs.build.outputs.END }}"
+          body: "Automated events + features + balance + wiki + API snapshots."
+          files: |
+            dist/POGO_Digest.xlsx
+            dist/POGO_Digest.csv
+            dist/POGO_Digest.json
+            dist/POGO_Events.ics
+            dist/POGO_Features.csv
+            dist/POGO_Features.json
+            dist/POGO_Balance.csv
+            dist/POGO_Balance.json
+            dist/POGO_Wiki_Library.json
+            dist/pogo_library/events/index.json
+            dist/pogo_library/events/index.ndjson
+            dist/pogo_library/features/index.json
+            dist/pogo_library/features/index.ndjson
+            dist/pogo_library/balance/index.json
+            dist/pogo_library/balance/index.ndjson
+            dist/pogo_library/wiki/index.json
+            dist/pogo_library/wiki/index.ndjson
+            dist/api/events.json
+            dist/api/events_upcoming_30d.json
+            dist/api/features.json
+            dist/api/balance.json
+            dist/api/wiki.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

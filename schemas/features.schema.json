@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Features",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["Feature Name"],
+    "properties": {
+      "Date Announced": {"type": ["string","null"]},
+      "Feature Name": {"type": "string"},
+      "Category": {"type": ["string","null"]},
+      "Summary": {"type": ["string","null"]},
+      "Source URL": {"type": ["string","null"]},
+      "Source": {"type": ["string","null"]}
+    }
+  }
+}

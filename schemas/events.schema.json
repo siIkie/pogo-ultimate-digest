@@ -1,88 +1,96 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://example.com/schemas/events.schema.json",
-  "title": "Pokémon GO Events",
-  "description": "Schema for normalized event rows used across CSV/JSON/Excel/ICS generation.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POGO Event Schema",
+  "description": "Schema for validating Pokémon GO event data",
   "type": "object",
-  "additionalProperties": true,
   "properties": {
     "Start Date": {
-      "description": "Event start date in YYYY-MM-DD (may be missing for undated entries).",
-      "type": ["string", "null"],
+      "type": "string",
+      "description": "Event start date in YYYY-MM-DD format",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
     },
     "End Date": {
-      "description": "Event end date in YYYY-MM-DD (falls back to Start Date when single-day).",
       "type": ["string", "null"],
+      "description": "Event end date in YYYY-MM-DD format (nullable)",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
     },
     "Event Name": {
-      "description": "Human-readable event title.",
       "type": "string",
-      "minLength": 1
+      "description": "Full name of the event"
     },
-    "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": {
-      "description": "Bucketed category used in digests; free-form but typically one of the listed.",
+    "Category": {
       "type": "string",
+      "description": "Type of event",
       "enum": [
-        "Community Day",
+        "CD",
         "CD Classic",
-        "Raid/Mega",
+        "Raid",
+        "Mega",
         "Shadow Raid",
         "Spotlight",
         "Research",
-        "Event/News",
-        "Other"
+        "Other",
+        "Event/News"
       ]
     },
     "Source": {
-      "description": "Short identifier for the origin of this row (e.g., niantic_rss, leekduck_events).",
-      "type": "string"
+      "type": "string",
+      "description": "Origin of the event listing"
     },
     "Source URL": {
-      "description": "Canonical URL where the item was found.",
       "type": "string",
+      "description": "Direct link to the source",
       "format": "uri"
     },
-    "Has Valid Dates": {
-      "description": "Computed flag indicating whether Start/End are present/usable for calendar outputs.",
-      "type": ["boolean", "string"],
-      "enum": [true, false, "true", "false"]
+    "Featured": {
+      "type": ["string", "null"],
+      "description": "Main Pokémon or feature highlighted (nullable)"
+    },
+    "Bonuses": {
+      "type": ["string", "null"],
+      "description": "List or description of bonuses (nullable)"
+    },
+    "Region": {
+      "type": ["string", "null"],
+      "description": "Region or scope of the event (nullable)"
+    },
+    "Sources": {
+      "type": "array",
+      "description": "List of raw sources contributing to this row",
+      "items": { "type": "string" }
     },
     "Date Parse Status": {
-      "description": "How dates were interpreted for this row.",
       "type": "string",
+      "description": "Status of date parsing for this row",
       "enum": [
-        "ok",
-        "single",
-        "end_only",
+        "parsed",
         "missing",
-        "failed-parse",
-        "inferred"
+        "inferred",
+        "invalid",
+        ""
       ]
+    },
+    "Date Inference Confidence": {
+      "type": "string",
+      "description": "Confidence score for inferred date (stringified float or blank)"
+    },
+    "Date Inference Source": {
+      "type": "string",
+      "description": "Source of inferred date, if any (e.g., pubDate, title regex, etc.)"
+    },
+    "Has Valid Dates": {
+      "type": "boolean",
+      "description": "True if Start Date is valid, false otherwise"
     }
   },
-  "required": ["Event Name"],
-  "examples": [
-    {
-      "Start Date": "2025-09-23",
-      "End Date": "2025-09-23",
-      "Event Name": "Hoothoot Spotlight Hour",
-      "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": "Spotlight",
-      "Source": "niantic_rss",
-      "Source URL": "https://pokemongolive.com/post/hoothoot-spotlight",
-      "Has Valid Dates": true,
-      "Date Parse Status": "single"
-    },
-    {
-      "Start Date": null,
-      "End Date": null,
-      "Event Name": "Completely Normal",
-      "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)": "Event/News",
-      "Source": "leekduck_events",
-      "Source URL": "https://leekduck.com/events/",
-      "Has Valid Dates": false,
-      "Date Parse Status": "missing"
-    }
-  ]
+  "required": [
+    "Start Date",
+    "Event Name",
+    "Category",
+    "Source",
+    "Source URL",
+    "Sources",
+    "Has Valid Dates"
+  ],
+  "additionalProperties": true
 }

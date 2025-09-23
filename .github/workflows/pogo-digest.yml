@@ -2,8 +2,7 @@ name: POGO Ultimate Pipeline
 
 on:
   schedule:
-    # every 4 hours
-    - cron: "0 */4 * * *"
+    - cron: "0 */4 * * *"  # every 4 hours
   workflow_dispatch:
   pull_request:
 
@@ -11,7 +10,7 @@ permissions:
   contents: write
 
 env:
-  PUBLISH_GHPAGES: "false"  # set to "true" only if you publish api/ to gh-pages
+  PUBLISH_GHPAGES: "false"
 
 jobs:
   check:
@@ -76,7 +75,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt || true
-          # Ensure scraper deps even if not listed yet
           pip install requests beautifulsoup4 lxml
 
       - name: Add repo root to PYTHONPATH
@@ -104,14 +102,14 @@ jobs:
         run: python build_wiki_library.py
 
       # -------------------------------
-      # External scrapers (maximize coverage, skip gracefully if pages change)
+      # External scrapers
       # -------------------------------
       - name: Scrape PvE Attackers (ALL 18 TYPES)
         run: |
           python scrapers/pve_attackers.py -o outputs/attackers.json \
             --types normal,fire,water,grass,electric,ice,fighting,poison,ground,flying,psychic,bug,rock,ghost,dragon,dark,steel,fairy
 
-      - name: Scrape PvP Rankings (PvPoke: all leagues + common cups)
+      - name: Scrape PvP Rankings (PvPoke)
         run: |
           python scrapers/pvp_rankings.py -o outputs/pvp.json \
             --leagues little,great,ultra,master \
@@ -126,10 +124,10 @@ jobs:
       - name: Scrape Egg Pools (LeekDuck)
         run: python scrapers/egg_pools.py -o outputs/eggs.json
 
-      - name: Scrape Shiny Availability (Primary + Fallback)
+      - name: Scrape Shiny Availability
         run: python scrapers/shinies.py -o outputs/shinies.json
 
-      - name: Scrape Items & Bonuses (Niantic Help + Static seed)
+      - name: Scrape Items & Bonuses (Niantic Help)
         run: python scrapers/items.py -o outputs/items.json
 
       # -------------------------------
@@ -146,52 +144,21 @@ jobs:
       - name: Make NDJSON indices (for RAG)
         run: python index/build_indices.py
 
-      - name: Export API endpoints (static JSON)
+      - name: Export API endpoints
         run: python api/export_endpoints.py
 
       # -------------------------------
-      # Augment master bundle with new scraper outputs (no need to edit build_master.py yet)
+      # Master bundle build (NEW)
       # -------------------------------
-      - name: Merge scraper outputs into master.json
-        run: |
-          python - <<'PY'
-          import json, os
-          def read(p):
-              if os.path.exists(p):
-                  with open(p,"r",encoding="utf-8") as f:
-                      return json.load(f)
-              return None
-          os.makedirs("api", exist_ok=True)
-          master = read("api/master.json") or {"_meta": {"note": "created by workflow"}, "events": [], "features": [], "balance": [], "wiki": []}
-          attackers = read("outputs/attackers.json") or {}
-          pvp       = read("outputs/pvp.json") or {}
-          ext_evt   = read("outputs/events_external.json") or {}
-          research  = read("outputs/research.json") or {}
-          eggs      = read("outputs/eggs.json") or {}
-          shinies   = read("outputs/shinies.json") or {}
-          items     = read("outputs/items.json") or {}
-
-          if "attackers" in attackers: master["attackers"] = attackers["attackers"]
-          if "rankings" in pvp:        master["pvp"]       = pvp["rankings"]
-          if "events" in ext_evt:      master["events_external"] = ext_evt["events"]
-          if "raid_bosses" in ext_evt: master["raid_bosses"]     = ext_evt["raid_bosses"]
-          if "tasks" in research:      master["research"]  = research["tasks"]
-          if "pools" in eggs:          master["eggs"]      = eggs["pools"]
-          if "shinies" in shinies:     master["shinies"]   = shinies["shinies"]
-          if "items" in items:         master["items"]     = items["items"]
-
-          with open("api/master.json","w",encoding="utf-8") as f:
-              json.dump(master, f, ensure_ascii=False, indent=2)
-          print("[ok] master.json augmented with scraper outputs")
-          PY
+      - name: Build master bundle
+        run: python api/build_master.py
 
       # -------------------------------
-      # Create a ZIP bundle for convenience
+      # Create ZIP bundle
       # -------------------------------
       - name: Create ZIP bundle
         run: |
           mkdir -p dist bundle/all
-          # Copy everything we ship
           cp -r POGO_Digest.xlsx POGO_Digest.csv POGO_Digest.json POGO_Events.ics bundle/all/ 2>/dev/null || true
           mkdir -p bundle/all/pogo_library/events bundle/all/pogo_library/features bundle/all/pogo_library/balance bundle/all/pogo_library/wiki
           cp -r pogo_library/events/index.json pogo_library/events/index.ndjson bundle/all/pogo_library/events/ 2>/dev/null || true
@@ -259,7 +226,7 @@ jobs:
         with:
           tag_name: pogo-dataset-${{ needs.build.outputs.END }}
           name: "POGO Dataset ${{ needs.build.outputs.END }}"
-          body: "Automated events + features + balance + wiki + external scrapers (PvE/PvP/events/bosses/research/eggs/shinies/items) + master bundle and ZIP."
+          body: "Automated dataset: core + scrapers + master bundle + ZIP."
           overwrite: true
           files: |
             dist/POGO_Digest.xlsx

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POGO Items & Bonuses",
+  "type": "object",
+  "properties": {
+    "_meta": { "type": "object" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "category": { "type": "string" },
+          "effects": { "type": "array", "items": { "type": "string" } },
+          "stacking": { "type": ["string", "null"] },
+          "notes": { "type": "string" },
+          "source": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$" }
+        },
+        "required": ["name", "source"],
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": ["items"],
+  "additionalProperties": true
+}

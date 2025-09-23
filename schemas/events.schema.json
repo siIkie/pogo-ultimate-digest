@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "POGO Event Schema",
-  "description": "Schema for validating Pokémon GO event data (flexible Category).",
+  "description": "Schema for validating Pokémon GO event data (flexible Category + optional normalized bucket).",
   "type": "object",
   "properties": {
     "Start Date": {
@@ -18,20 +18,14 @@
       "type": "string",
       "description": "Full name of the event"
     },
-
-    /*
-      IMPORTANT CHANGE:
-      - Category is now any non-empty string (no enum), so we don't fail when new labels appear.
-      - We also support an optional 'Category Normalized' that CAN be an enum if present.
-    */
     "Category": {
       "type": "string",
       "minLength": 1,
-      "description": "Human/Source label for event type (free-form: e.g., 'Community Day', 'Raid Hour', 'Event/News')"
+      "description": "Human/source label for event type (free-form)."
     },
     "Category Normalized": {
       "type": "string",
-      "description": "Stable bucket derived by our pipeline; optional",
+      "description": "Stable bucket derived by the pipeline (optional).",
       "enum": [
         "CD",
         "CD Classic",
@@ -44,7 +38,6 @@
         "Event/News"
       ]
     },
-
     "Source": {
       "type": "string",
       "description": "Origin of the event listing"
@@ -59,7 +52,6 @@
       "description": "List of raw sources contributing to this row",
       "items": { "type": "string" }
     },
-
     "Featured": {
       "type": ["string", "null"],
       "description": "Main Pokémon or feature highlighted (nullable)"
@@ -72,7 +64,6 @@
       "type": ["string", "null"],
       "description": "Region or scope of the event (nullable)"
     },
-
     "Date Parse Status": {
       "type": "string",
       "description": "Status of date parsing for this row",
@@ -91,7 +82,6 @@
       "description": "True if Start Date is valid, false otherwise"
     }
   },
-
   "required": [
     "Start Date",
     "Event Name",
@@ -101,6 +91,5 @@
     "Sources",
     "Has Valid Dates"
   ],
-
   "additionalProperties": true
 }

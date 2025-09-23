@@ -208,19 +208,21 @@ jobs:
       - name: Create/Update Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: pogo-dataset-${{ github.run_id }}
-          name: "POGO Dataset ${{ github.run_id }}"
-          body: "Automated dataset build (events + attackers + pvp + research + eggs + shiny + items + API + master bundle)."
+          tag_name: pogo-dataset-${{ steps.dates.outputs.END }}-${{ github.run_id }}
+          name: "POGO Dataset ${{ steps.dates.outputs.END }} (run ${{ github.run_number }})"
+          body: "Automated dataset build."
+          make_latest: true
+          preserve_order: true
+          fail_on_unmatched_files: false
           files: |
             dist/master.json
+            dist/master.ndjson
             dist/master.zip
             dist/POGO_Digest.xlsx
             dist/POGO_Digest.csv
             dist/POGO_Digest.json
             dist/POGO_Events.ics
             dist/api/*.json
-            dist/pogo_library/**/*
-          make_latest: true
-          preserve_order: true
+            dist/pogo_library/**/* 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

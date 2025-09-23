@@ -24,6 +24,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            **/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -62,25 +66,13 @@ jobs:
         run: |
           python scrapers/pve_attackers.py
           test -s pogo_library/attackers/index.json
-          python <<'PY'
-import json, pathlib
-p = pathlib.Path("pogo_library/attackers/index.json")
-data = json.loads(p.read_text(encoding="utf-8"))
-assert isinstance(data, list) and len(data) >= 50, f"attackers too small: {len(data) if isinstance(data,list) else 'NA'}"
-print("attackers ok:", len(data))
-PY
+          python -c "import json, pathlib; p=pathlib.Path('pogo_library/attackers/index.json'); d=json.loads(p.read_text(encoding='utf-8')); assert isinstance(d, list) and len(d)>=50, f'attackers too small: {len(d) if isinstance(d,list) else \"NA\"}'; print('attackers ok:', len(d))"
 
       - name: Scrape PvP Rankings (PvPoke)
         run: |
           python scrapers/pvp_rankings.py
           test -s pogo_library/pvp/index.json
-          python <<'PY'
-import json, pathlib
-p = pathlib.Path("pogo_library/pvp/index.json")
-data = json.loads(p.read_text(encoding="utf-8"))
-assert isinstance(data, dict) and any(len(v)>=50 for v in data.values()), "pvp rankings look empty"
-print("pvp ok:", {k:len(v) for k,v in data.items()})
-PY
+          python -c "import json, pathlib; p=pathlib.Path('pogo_library/pvp/index.json'); d=json.loads(p.read_text(encoding='utf-8')); assert isinstance(d, dict) and any(len(v)>=50 for v in d.values()), 'pvp rankings look empty'; print('pvp ok:', {k:len(v) for k,v in d.items()})"
 
       - name: Scrape External Events & Raid Bosses (LeekDuck/News)
         run: |

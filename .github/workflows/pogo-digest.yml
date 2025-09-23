@@ -2,7 +2,7 @@ name: POGO Ultimate Pipeline
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # every 15 minutes (adjust for prod, e.g., '0 */2 * * *')
+    - cron: "0 */4 * * *"   # every 4 hours
   workflow_dispatch:
 
 permissions:
@@ -75,7 +75,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 🔧 IMPORTANT: make repo root importable so 'common.utils' works
+      # Make repo root importable so 'common.utils' works in all scripts
       - name: Add repo root to PYTHONPATH
         shell: bash
         run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
@@ -120,6 +120,7 @@ jobs:
             POGO_Digest.xlsx
             POGO_Digest.csv
             POGO_Digest.json
+            POGO_Digest_undated.json
             POGO_Events.ics
             POGO_Features.csv
             POGO_Features.json
@@ -161,6 +162,7 @@ jobs:
             dist/POGO_Digest.xlsx
             dist/POGO_Digest.csv
             dist/POGO_Digest.json
+            dist/POGO_Digest_undated.json
             dist/POGO_Events.ics
             dist/POGO_Features.csv
             dist/POGO_Features.json

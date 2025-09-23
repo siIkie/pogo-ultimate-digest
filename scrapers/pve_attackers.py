@@ -689,10 +689,12 @@ def main():
 
     # --- sanity check (correct JSON shape) ---
     attackers = payload.get("attackers", [])
-    if not isinstance(attackers, list) or len(attackers) < 50:
-        raise AssertionError(f"attackers too small: {len(attackers) if isinstance(attackers, list) else 'NA'}")
+    if not isinstance(attackers, list):
+      raise AssertionError("attackers not a list")
+    if len(attackers) < 50:
+      raise AssertionError(f"attackers too small: {len(attackers)}")
 
-    print(f"[ok] Wrote {out_path} and {alt_path} with {len(unique_rows)} unique rows")
+    print(f"[ok] Final attackers count: {len(attackers)}")
 
 
 if __name__ == "__main__":

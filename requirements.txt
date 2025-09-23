@@ -1,16 +1,25 @@
-# Core scraping / parsing
+# --- Core utilities ---
 requests>=2.31.0
 beautifulsoup4>=4.12.2
 lxml>=4.9.3
 feedparser>=6.0.11
 
-# Data wrangling & outputs
+# --- Data wrangling & export ---
 pandas>=2.1.0
 openpyxl>=3.1.2
 python-dateutil>=2.8.2
+pytz>=2023.3
 
-# Validation
+# --- Validation & schema ---
 jsonschema>=4.21.1
 
-# Timezones (often useful downstream)
-pytz>=2023.3
+# --- YAML parsing (required by build_pogo_library.py) ---
+PyYAML>=6.0.1
+
+# --- Optional but common in this repo ecosystem ---
+# HTML parsing helpers
+soupsieve>=2.5
+# Excel/CSV compatibility
+xlrd>=2.0.1
+# Rich text / CLI formatting (nice-to-have for debugging)
+rich>=13.5.2

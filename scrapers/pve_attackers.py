@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Resilient PvE attacker scraper with cloudscraper + optional paid-scraper fallback.
+Resilient PvE attacker scraper with the following fetch order:
+  1) cloudscraper (if installed)
+  2) requests.Session with retries + rotating UA
+  3) Playwright (Chromium, headless) fallback
+  4) Optional paid scraping provider via env (SCRAPER_API_PROVIDER/SCRAPER_API_KEY)
+  5) Fallback species list from pokemondb (to avoid empty output)
 
-Keeps previous heuristics for pokebattler, gamepress, gohub and a pokemondb fallback.
-Writes both outputs/attackers.json and pogo_library/attackers/index.json for CI compatibility.
+Writes both:
+  - outputs/attackers.json
+  - pogo_library/attackers/index.json
 """
 
 from __future__ import annotations
@@ -19,18 +25,25 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-# optional (best-effort) import for bypassing simple Cloudflare protections
+# optional best-effort Cloudflare solver
 try:
-    import cloudscraper
+    import cloudscraper  # type: ignore
 except Exception:
     cloudscraper = None
+
+# optional Playwright (browser automation)
+try:
+    from playwright.sync_api import sync_playwright  # type: ignore
+except Exception:
+    sync_playwright = None  # we'll log if we try and it's missing
 
 import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# realistic UAs
+# -------------- constants --------------
+
 USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15",
@@ -41,8 +54,7 @@ DEFAULT_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Connection": "keep-alive",
 }
-
-DEFAULT_TIMEOUT = 20
+DEFAULT_TIMEOUT = 25
 SLEEP_BETWEEN_REQUESTS = 1.0
 ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -51,42 +63,73 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime(ISO_Z)
 
 
+# -------------- HTTP fetchers --------------
+
 def make_session() -> requests.Session:
     s = requests.Session()
     retries = Retry(
-        total=3,
-        backoff_factor=1,
+        total=3, backoff_factor=1,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET", "OPTIONS"],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
     )
     s.mount("https://", HTTPAdapter(max_retries=retries))
     s.mount("http://", HTTPAdapter(max_retries=retries))
     return s
 
 
+def fetch_with_playwright(url: str, referer: Optional[str] = None) -> Optional[str]:
+    """Render the page in a real headless Chromium and return final HTML."""
+    if sync_playwright is None:
+        print("[info] Playwright not available; skipping browser fallback", file=sys.stderr)
+        return None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=[
+                "--no-sandbox", "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ])
+            context = browser.new_context(
+                user_agent=USER_AGENTS[0],
+                locale="en-US",
+                timezone_id="UTC",
+                viewport={"width": 1366, "height": 768},
+                extra_http_headers={**DEFAULT_HEADERS, **({"Referer": referer} if referer else {})},
+            )
+            page = context.new_page()
+            # request interception: occasionally helps reduce bot flags
+            page.route("**/*", lambda route: route.continue_())
+            page.goto(url, wait_until="networkidle", timeout=DEFAULT_TIMEOUT * 1000)
+            # Gentle scroll to trigger lazy loaders
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(600)
+            html = page.content()
+            context.close()
+            browser.close()
+            return html
+    except Exception as e:
+        print(f"[warn] Playwright fetch failed: {e}", file=sys.stderr)
+        return None
+
+
 def http_get(url: str, params: Optional[Dict[str, Any]] = None, referer: Optional[str] = None) -> Optional[str]:
     """
-    Robust GET that tries, in order:
-      1. cloudscraper (if installed) with UA rotation
-      2. requests.Session with UA rotation
-      3. (optional) paid scraping provider if env SCRAPER_API_PROVIDER + SCRAPER_API_KEY is set
-    Returns response text or None.
+    Best-effort GET with progressive fallbacks:
+      cloudscraper -> requests -> Playwright -> paid provider
     """
     params = dict(params or {})
     params["_"] = int(time.time())
 
-    # Try cloudscraper first (if available)
+    # 1) cloudscraper
     if cloudscraper is not None:
         try:
             for i, ua in enumerate(USER_AGENTS):
                 try:
                     scr = cloudscraper.create_scraper(browser={"custom": ua})
-                    headers = dict(DEFAULT_HEADERS)
+                    headers = dict(DEFAULT_HEADERS, **({"Referer": referer} if referer else {}))
                     headers["User-Agent"] = ua
-                    if referer:
-                        headers["Referer"] = referer
                     resp = scr.get(url, headers=headers, params=params, timeout=DEFAULT_TIMEOUT, allow_redirects=True)
                     if resp.status_code == 200:
+                        print(f"[info] cloudscraper GET OK {url}", file=sys.stderr)
                         return resp.text
                     if resp.status_code == 403:
                         print(f"[warn] cloudscraper GET {url} -> 403 (attempt {i+1})", file=sys.stderr)
@@ -94,40 +137,42 @@ def http_get(url: str, params: Optional[Dict[str, Any]] = None, referer: Optiona
                         continue
                     if resp.status_code >= 400:
                         print(f"[warn] cloudscraper GET {url} -> {resp.status_code}", file=sys.stderr)
-                        return None
+                        break
                 except Exception as e:
                     print(f"[warn] cloudscraper attempt failed: {e}", file=sys.stderr)
-                    time.sleep(0.5)
-            print(f"[warn] cloudscraper GET {url} -> exhausted attempts", file=sys.stderr)
         except Exception as e:
             print(f"[warn] cloudscraper top-level error: {e}", file=sys.stderr)
 
-    # Fallback to requests with retries
+    # 2) requests with retries
     session = make_session()
     for attempt in range(4):
         ua = USER_AGENTS[attempt % len(USER_AGENTS)]
-        headers = dict(DEFAULT_HEADERS)
+        headers = dict(DEFAULT_HEADERS, **({"Referer": referer} if referer else {}))
         headers["User-Agent"] = ua
-        if referer:
-            headers["Referer"] = referer
         try:
             r = session.get(url, headers=headers, params=params, timeout=DEFAULT_TIMEOUT, allow_redirects=True)
         except Exception as e:
-            print(f"[warn] GET {url} try#{attempt+1} failed: {e}", file=sys.stderr)
+            print(f"[warn] requests GET {url} try#{attempt+1} failed: {e}", file=sys.stderr)
             time.sleep(1 + attempt)
             continue
-
         if r.status_code == 200:
+            print(f"[info] requests GET OK {url}", file=sys.stderr)
             return r.text
         if r.status_code == 403:
-            print(f"[warn] GET {url} -> 403 (attempt {attempt+1}), trying alternate headers", file=sys.stderr)
+            print(f"[warn] requests GET {url} -> 403 (attempt {attempt+1})", file=sys.stderr)
             time.sleep(1 + attempt)
             continue
         if r.status_code >= 400:
-            print(f"[warn] GET {url} -> {r.status_code}", file=sys.stderr)
-            return None
+            print(f"[warn] requests GET {url} -> {r.status_code}", file=sys.stderr)
+            break  # try browser fallback next
 
-    # Final: optional paid scraping provider fallback if configured via env
+    # 3) Playwright browser fallback
+    html = fetch_with_playwright(url, referer=referer)
+    if html:
+        print(f"[info] Playwright GET OK {url}", file=sys.stderr)
+        return html
+
+    # 4) Optional paid scraping provider
     provider = os.environ.get("SCRAPER_API_PROVIDER", "").strip().lower()
     key = os.environ.get("SCRAPER_API_KEY", "").strip()
     if provider and key:
@@ -136,12 +181,14 @@ def http_get(url: str, params: Optional[Dict[str, Any]] = None, referer: Optiona
                 api_url = f"https://api.scraperapi.com/?api_key={key}&url={requests.utils.requote_uri(url)}"
                 r = requests.get(api_url, timeout=DEFAULT_TIMEOUT)
                 if r.status_code == 200:
+                    print(f"[info] SCRAPER_API GET OK {url}", file=sys.stderr)
                     return r.text
                 print(f"[warn] SCRAPER_API -> {r.status_code}", file=sys.stderr)
             elif provider in ("scrapingbee", "scraping-bee"):
                 api_url = f"https://app.scrapingbee.com/api/v1?api_key={key}&url={requests.utils.requote_uri(url)}"
                 r = requests.get(api_url, timeout=DEFAULT_TIMEOUT)
                 if r.status_code == 200:
+                    print(f"[info] SCRAPINGBEE GET OK {url}", file=sys.stderr)
                     return r.text
                 print(f"[warn] SCRAPINGBEE -> {r.status_code}", file=sys.stderr)
             else:
@@ -152,6 +199,8 @@ def http_get(url: str, params: Optional[Dict[str, Any]] = None, referer: Optiona
     print(f"[warn] GET {url} -> exhausted retries", file=sys.stderr)
     return None
 
+
+# -------------- soup & helpers --------------
 
 def soupify(html: Optional[str]) -> Optional[BeautifulSoup]:
     if not html:
@@ -216,6 +265,8 @@ def to_type_bucket(name: str, hint: str = "") -> str:
     return ""
 
 
+# -------------- model --------------
+
 @dataclasses.dataclass
 class AttackerRow:
     name: str
@@ -264,9 +315,7 @@ def as_dict(r: AttackerRow) -> Dict[str, Any]:
     return dataclasses.asdict(r)
 
 
-# ------------------------
-# Pokebattler scraper (heuristic)
-# ------------------------
+# -------------- scrapers --------------
 
 def scrape_pokebattler(types: Iterable[str]) -> List[AttackerRow]:
     base = "https://www.pokebattler.com/raids"
@@ -338,10 +387,6 @@ def scrape_pokebattler(types: Iterable[str]) -> List[AttackerRow]:
                 )
     return out
 
-
-# ------------------------
-# GamePress scraper
-# ------------------------
 
 def scrape_gamepress(types: Iterable[str]) -> List[AttackerRow]:
     base = "https://gamepress.gg/pokemongo"
@@ -429,10 +474,6 @@ def scrape_gamepress(types: Iterable[str]) -> List[AttackerRow]:
             )
     return out
 
-
-# ------------------------
-# GO Hub scraper
-# ------------------------
 
 def scrape_gohub(types: Iterable[str]) -> List[AttackerRow]:
     base = "https://pokemongohub.net/category/guides/"
@@ -527,9 +568,7 @@ def scrape_gohub(types: Iterable[str]) -> List[AttackerRow]:
     return out
 
 
-# ------------------------
-# Fallback: Pokemondb names
-# ------------------------
+# -------------- fallback: pokemondb species (never empty) --------------
 
 def scrape_pokemondb(types: Iterable[str], limit: int = 400) -> List[AttackerRow]:
     url = "https://pokemondb.net/pokedex/all"
@@ -545,9 +584,7 @@ def scrape_pokemondb(types: Iterable[str], limit: int = 400) -> List[AttackerRow
     names: List[str] = []
     if table:
         for tr in table.select("tbody tr")[:limit]:
-            td = tr.select_one("td.cell-name a")
-            if not td:
-                td = tr.select_one("td:first-child a")
+            td = tr.select_one("td.cell-name a") or tr.select_one("td:first-child a")
             if td:
                 names.append(text(td))
     else:
@@ -557,35 +594,28 @@ def scrape_pokemondb(types: Iterable[str], limit: int = 400) -> List[AttackerRow
                 names.append(label)
         names = list(dict.fromkeys(names))[:limit]
 
-    types_low = {t.lower() for t in types}
-    default_bucket = next(iter(types_low), "") if types_low else ""
-    for i, n in enumerate(names, start=1):
-        out.append(
+    buckets = list({t.lower() for t in types}) or [""]
+    out_rows: List[AttackerRow] = []
+    i = 0
+    for n in names:
+        bucket = buckets[i % len(buckets)]
+        i += 1
+        out_rows.append(
             AttackerRow(
-                name=n,
-                form=guess_form(n),
-                type_bucket=default_bucket,
-                fast_move="",
-                charge_move="",
-                source="pokemondb",
-                rank=i,
-                score=None,
-                score_kind="",
-                notes="fallback: pokemondb names",
-                url=url,
-                ts=ts,
+                name=n, form=guess_form(n), type_bucket=bucket,
+                fast_move="", charge_move="",
+                source="pokemondb", rank=i, score=None, score_kind="",
+                notes="fallback: pokemondb names", url=url, ts=ts
             )
         )
-    return out
+    return out_rows
 
 
-# ------------------------
-# Orchestration
-# ------------------------
+# -------------- orchestration --------------
 
 def normalize_types_arg(raw: Optional[str]) -> List[str]:
-    # Default to all 18 Pokemon GO types
     if not raw:
+        # all 18 types
         return [
             "bug", "dark", "dragon", "electric", "fairy", "fighting", "fire", "flying",
             "ghost", "grass", "ground", "ice", "normal", "poison", "psychic", "rock", "steel", "water"
@@ -619,13 +649,12 @@ def main():
     except Exception as e:
         print(f"[warn] gohub scrape failed: {e}", file=sys.stderr)
 
-    # If few rows collected, try pokemondb fallback
     if len(rows) < 80:
         try:
-            fallback = scrape_pokemondb(types, limit=400)
-            if fallback:
-                print(f"[info] Using pokemondb fallback: added {len(fallback)} rows", file=sys.stderr)
-                rows.extend(fallback)
+            fb = scrape_pokemondb(types, limit=400)
+            if fb:
+                print(f"[info] Using pokemondb fallback: added {len(fb)} rows", file=sys.stderr)
+                rows.extend(fb)
         except Exception as e:
             print(f"[warn] pokemondb fallback failed: {e}", file=sys.stderr)
 

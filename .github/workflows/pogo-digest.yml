@@ -24,10 +24,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: |
-            requirements.txt
-            **/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -35,8 +31,12 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            pip install requests beautifulsoup4 lxml pandas openpyxl pyyaml jsonschema scikit-learn joblib python-dateutil icalendar
+            pip install requests beautifulsoup4 lxml pandas openpyxl pyyaml jsonschema scikit-learn joblib python-dateutil icalendar cloudscraper
           fi
+
+      - name: Install Playwright browsers (Chromium only)
+        run: |
+          python -m playwright install --with-deps chromium
 
       - name: Add repo root to PYTHONPATH
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
@@ -61,22 +61,38 @@ jobs:
       - name: Build wiki library
         run: python build_wiki_library.py
 
-      - name: Install Playwright browsers (Chromium only)
-        run: |
-          python -m playwright install --with-deps chromium
-
-      # --- Scrapers (use your actual filenames) + sanity checks ---
+      # --- Scrapers + sanity checks ---
       - name: Scrape PvE Attackers (ALL 18 TYPES)
         run: |
           python scrapers/pve_attackers.py
           test -s pogo_library/attackers/index.json
-          python -c "import json, pathlib; p=pathlib.Path('pogo_library/attackers/index.json'); d=json.loads(p.read_text(encoding='utf-8')); assert isinstance(d, list) and len(d)>=50, f'attackers too small: {len(d) if isinstance(d,list) else \"NA\"}'; print('attackers ok:', len(d))"
+          python - <<'PY'
+import json, pathlib, sys
+p = pathlib.Path("pogo_library/attackers/index.json")
+data = json.loads(p.read_text(encoding="utf-8"))
+attackers = data.get("attackers") if isinstance(data, dict) else None
+if not isinstance(attackers, list):
+    print("attackers not a list", file=sys.stderr)
+    sys.exit(1)
+if len(attackers) < 50:
+    print(f"attackers too small: {len(attackers)}", file=sys.stderr)
+    sys.exit(1)
+print("attackers ok:", len(attackers))
+PY
 
       - name: Scrape PvP Rankings (PvPoke)
         run: |
           python scrapers/pvp_rankings.py
           test -s pogo_library/pvp/index.json
-          python -c "import json, pathlib; p=pathlib.Path('pogo_library/pvp/index.json'); d=json.loads(p.read_text(encoding='utf-8')); assert isinstance(d, dict) and any(len(v)>=50 for v in d.values()), 'pvp rankings look empty'; print('pvp ok:', {k:len(v) for k,v in d.items()})"
+          python - <<'PY'
+import json, pathlib, sys
+p = pathlib.Path("pogo_library/pvp/index.json")
+data = json.loads(p.read_text(encoding="utf-8"))
+if not isinstance(data, dict) or not any(isinstance(v, list) and len(v) >= 50 for v in data.values()):
+    print("pvp rankings look empty", file=sys.stderr)
+    sys.exit(1)
+print("pvp ok:", {k: len(v) for k, v in data.items() if isinstance(v, list)})
+PY
 
       - name: Scrape External Events & Raid Bosses (LeekDuck/News)
         run: |
@@ -152,12 +168,13 @@ jobs:
           path: dist
 
       - name: Create/Update Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: pogo-dataset-${{ needs.build.outputs.END }}
           name: "POGO Dataset ${{ needs.build.outputs.END }}"
           body: "Automated POGO dataset build (events, features, balance, wiki, scrapers, indices, API, master.json)."
           make_latest: true
+          preserve_order: true
           files: |
             dist/master.json
             dist/master.zip

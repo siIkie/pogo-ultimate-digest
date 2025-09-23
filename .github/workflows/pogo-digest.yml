@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       END: ${{ steps.dates.outputs.END }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,40 +62,16 @@ jobs:
       - name: Build wiki library
         run: python build_wiki_library.py
 
-      # --- Scrapers + sanity checks ---
+      # --- Scrapers (validation handled inside scripts or by file existence) ---
       - name: Scrape PvE Attackers (ALL 18 TYPES)
-        shell: bash
         run: |
           python scrapers/pve_attackers.py
           test -s pogo_library/attackers/index.json
-          python - <<'PY'
-import json, pathlib, sys
-p = pathlib.Path("pogo_library/attackers/index.json")
-data = json.loads(p.read_text(encoding="utf-8"))
-attackers = data.get("attackers") if isinstance(data, dict) else None
-if not isinstance(attackers, list):
-    print("attackers not a list", file=sys.stderr)
-    sys.exit(1)
-if len(attackers) < 50:
-    print(f"attackers too small: {len(attackers)}", file=sys.stderr)
-    sys.exit(1)
-print("attackers ok:", len(attackers))
-PY
 
       - name: Scrape PvP Rankings (PvPoke)
-        shell: bash
         run: |
           python scrapers/pvp_rankings.py
           test -s pogo_library/pvp/index.json
-          python - <<'PY'
-import json, pathlib, sys
-p = pathlib.Path("pogo_library/pvp/index.json")
-data = json.loads(p.read_text(encoding="utf-8"))
-if not isinstance(data, dict) or not any(isinstance(v, list) and len(v) >= 50 for v in data.values()):
-    print("pvp rankings look empty", file=sys.stderr)
-    sys.exit(1)
-print("pvp ok:", {k: len(v) for k, v in data.items() if isinstance(v, list)})
-PY
 
       - name: Scrape External Events & Raid Bosses (LeekDuck/News)
         run: |

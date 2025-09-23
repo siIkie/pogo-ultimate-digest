@@ -75,6 +75,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # 🔧 IMPORTANT: make repo root importable so 'common.utils' works
+      - name: Add repo root to PYTHONPATH
+        shell: bash
+        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
+
       - name: Compute date range
         id: dates
         run: |

@@ -3,12 +3,12 @@ requests>=2.31.0
 beautifulsoup4>=4.12.2
 lxml>=4.9.3
 feedparser>=6.0.11
-PyYAML>=6.0.1          # yaml in build_pogo_library.py
+PyYAML>=6.0.1          # yaml config parsing
 
 # --- Data wrangling & export ---
 pandas>=2.1.0
-numpy>=1.26.0          # explicit since pandas depends on it; avoids resolver surprises
-openpyxl>=3.1.2        # write Excel
+numpy>=1.26.0
+openpyxl>=3.1.2        # Excel writer/reader
 python-dateutil>=2.8.2
 pytz>=2023.3
 
@@ -16,12 +16,15 @@ pytz>=2023.3
 jsonschema>=4.21.1
 
 # --- Calendar / ICS generation ---
-icalendar>=5.0.10      # for building .ics files
+icalendar>=5.0.10
 
-# --- RAG / indexing helpers ---
+# --- Indexing / RAG helpers ---
 joblib>=1.3.0
+scikit-learn>=1.3.0    # provides sklearn.feature_extraction.text.TfidfVectorizer
+scipy>=1.10.0
+threadpoolctl>=3.1.0
 
-# --- Nice-to-haves that frequently appear in this style of repo (safe to include) ---
-soupsieve>=2.5         # used by bs4 selectors
-xlrd>=2.0.1            # legacy .xls reads if ever needed
-rich>=13.7.0           # pretty logging; harmless if unused
+# --- Nice-to-haves commonly used in this stack ---
+soupsieve>=2.5
+xlrd>=2.0.1
+rich>=13.7.0

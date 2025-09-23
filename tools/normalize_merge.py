@@ -7,15 +7,21 @@ This script:
   - Renames the verbose category column
         "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)"
     to the canonical short key "Category" (preserves original as "Category (raw)").
-  - Ensures standard columns exist and are coerced to safe types.
+  - Ensures standard/required columns exist with schema-compatible types.
+  - Forces "Has Valid Dates" to a strict boolean; fixes malformed dates.
   - Ensures "Sources" (array) exists; if only "Source" exists, creates Sources = [Source].
+  - Coerces Category to the schema enum; unknown => "Other" (raw preserved).
+  - Normalizes "Date Parse Status" to the allowed set.
+  - Ensures "Source URL" is a non-empty URI; if empty, uses "about:blank" (valid format).
   - Validates against schemas/events.schema.json (if jsonschema is installed).
-  - Writes back the normalized rows to pogo_library/events/index.json and
-    a safety copy pogo_library/events/index.normalized.json.
+  - Writes the normalized rows to:
+        pogo_library/events/index.json
+        pogo_library/events/index.normalized.json
 """
 
 import os
 import json
+import re
 import sys
 from typing import List, Dict, Any
 
@@ -28,15 +34,33 @@ DIGEST_CSV = "POGO_Digest.csv"
 DIGEST_XLSX = "POGO_Digest.xlsx"
 SCHEMA_PATH = os.path.join("schemas", "events.schema.json")
 
-# The verbose header we sometimes see
+# The verbose header we sometimes see from upstream steps
 VERBOSE_CATEGORY_KEY = "Category (CD / CD Classic / Raid / Mega / Shadow Raid / Spotlight / Research / Other)"
 SHORT_CATEGORY_KEY = "Category"
+
+# Schema constraints we want to conform to
+CATEGORY_ENUM = {
+    "Community Day": "Community Day",  # tolerated, maps to Other unless enum changed
+    "CD Classic": "CD Classic",
+    "Raid": "Raid",
+    "Mega": "Mega",
+    "Shadow Raid": "Shadow Raid",
+    "Spotlight": "Spotlight",
+    "Research": "Research",
+    "Other": "Other",
+    "Event/News": "Event/News"
+}
+# Final allowed labels
+CATEGORY_ALLOWED = set(CATEGORY_ENUM.values())
+
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DATE_STATUS_ALLOWED = {"parsed", "missing", "inferred", "invalid", ""}
 
 
 # ------- Utilities -------
 def load_events() -> pd.DataFrame:
     """Load events from JSON/CSV/XLSX (whichever exists first)."""
-    # 1) Preferred library JSON
+    # 1) Preferred: library JSON
     if os.path.exists(LIB_EVENTS_JSON):
         try:
             with open(LIB_EVENTS_JSON, "r", encoding="utf-8") as f:
@@ -47,7 +71,7 @@ def load_events() -> pd.DataFrame:
         except Exception as e:
             print(f"[warn] Failed reading {LIB_EVENTS_JSON}: {e}", file=sys.stderr)
 
-    # 2) CSV (fallback)
+    # 2) CSV fallback
     if os.path.exists(DIGEST_CSV):
         try:
             df = pd.read_csv(DIGEST_CSV)
@@ -56,7 +80,7 @@ def load_events() -> pd.DataFrame:
         except Exception as e:
             print(f"[warn] Failed reading {DIGEST_CSV}: {e}", file=sys.stderr)
 
-    # 3) Excel (fallback)
+    # 3) Excel fallback
     if os.path.exists(DIGEST_XLSX):
         try:
             xls = pd.ExcelFile(DIGEST_XLSX)
@@ -76,7 +100,7 @@ def load_events() -> pd.DataFrame:
     ])
 
 
-def _as_str(x):
+def _as_str(x) -> str:
     if x is None:
         return ""
     try:
@@ -87,11 +111,15 @@ def _as_str(x):
     return str(x)
 
 
+def _valid_date(s: str) -> bool:
+    return bool(DATE_RE.match(s or ""))
+
+
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Standardize keys and ensure canonical 'Category' and 'Sources' exist."""
     df = df.copy()
 
-    # Map verbose category -> short key; preserve original
+    # ---------- Category normalization ----------
     if VERBOSE_CATEGORY_KEY in df.columns:
         df["Category (raw)"] = df[VERBOSE_CATEGORY_KEY]
         if SHORT_CATEGORY_KEY not in df.columns:
@@ -99,11 +127,10 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         else:
             short_is_empty = df[SHORT_CATEGORY_KEY].isna() | (df[SHORT_CATEGORY_KEY].astype(str).str.strip() == "")
             df.loc[short_is_empty, SHORT_CATEGORY_KEY] = df.loc[short_is_empty, VERBOSE_CATEGORY_KEY]
-
     if SHORT_CATEGORY_KEY not in df.columns:
         df[SHORT_CATEGORY_KEY] = ""
 
-    # Ensure minimal set of columns exists
+    # Required/supported columns
     need = [
         "Start Date", "End Date", "Event Name",
         SHORT_CATEGORY_KEY, "Source", "Source URL",
@@ -113,40 +140,81 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         if c not in df.columns:
             df[c] = ""
 
-    # String-coerce text fields
+    # ---------- Coerce text fields ----------
     for c in ["Event Name", SHORT_CATEGORY_KEY, "Source", "Source URL", "Date Parse Status"]:
         df[c] = df[c].map(_as_str)
 
-    # Dates remain strings (YYYY-MM-DD) or empty
+    # ---------- Dates validation (YYYY-MM-DD or empty) ----------
     for c in ["Start Date", "End Date"]:
         df[c] = df[c].map(_as_str)
+        df.loc[~df[c].map(_valid_date) & (df[c] != ""), c] = ""  # clear malformed
 
-    # Normalize Has Valid Dates to bool-ish (or empty)
-    if "Has Valid Dates" in df.columns:
-        def _to_boolish(v):
-            if isinstance(v, bool):
-                return v
-            s = _as_str(v).strip().lower()
-            if s in ("true", "1", "yes", "y"):
-                return True
-            if s in ("false", "0", "no", "n"):
-                return False
-            return ""  # keep blank if unknown
-        df["Has Valid Dates"] = df["Has Valid Dates"].map(_to_boolish)
+    # ---------- Has Valid Dates: strict boolean ----------
+    def _to_bool(v):
+        if isinstance(v, bool):
+            return v
+        s = _as_str(v).strip().lower()
+        if s in ("true", "1", "yes", "y"):
+            return True
+        if s in ("false", "0", "no", "n"):
+            return False
+        # Default to False to satisfy schema "boolean"
+        return False
+    df["Has Valid Dates"] = df["Has Valid Dates"].map(_to_bool)
 
-    # Ensure "Sources" is an ARRAY; if missing, synthesize from "Source"
+    # If start date is empty, ensure Has Valid Dates is False
+    df.loc[df["Start Date"] == "", "Has Valid Dates"] = False
+
+    # ---------- Sources array ----------
     if "Sources" not in df.columns:
         df["Sources"] = None
 
-    # Build Sources from Source where needed
     def _make_sources(row):
-        current = row.get("Sources", None)
-        if isinstance(current, list) and all(isinstance(x, str) for x in current):
-            return current
+        cur = row.get("Sources", None)
+        if isinstance(cur, list) and all(isinstance(x, str) for x in cur):
+            return cur
         src = _as_str(row.get("Source", "")).strip()
         return [src] if src else []
-
     df["Sources"] = df.apply(_make_sources, axis=1)
+
+    # ---------- Category coercion to enum ----------
+    def _coerce_cat(v: str) -> str:
+        v = _as_str(v).strip()
+        if v in CATEGORY_ALLOWED:
+            return v
+        # Try simple mappings
+        low = v.lower()
+        if "community day" in low:
+            return "Community Day" if "Community Day" in CATEGORY_ALLOWED else "Other"
+        if "research" in low:
+            return "Research"
+        if "spotlight" in low:
+            return "Spotlight"
+        if "shadow raid" in low:
+            return "Shadow Raid"
+        if "mega" in low or "raid" in low:
+            return "Raid" if "Raid" in CATEGORY_ALLOWED else "Raid/Mega" if "Raid/Mega" in CATEGORY_ALLOWED else "Other"
+        if "event" in low or "news" in low:
+            return "Event/News" if "Event/News" in CATEGORY_ALLOWED else "Other"
+        return "Other"
+    df[SHORT_CATEGORY_KEY] = df[SHORT_CATEGORY_KEY].map(_coerce_cat)
+
+    # ---------- Date Parse Status normalization ----------
+    def _norm_status(v: str) -> str:
+        s = _as_str(v).strip().lower()
+        if s in DATE_STATUS_ALLOWED:
+            return s
+        # map some likely variants
+        if s in {"ok", "single", "end_only"}:
+            return "parsed"
+        if s in {"none", "unknown", "n/a"}:
+            return ""
+        return "invalid"
+    df["Date Parse Status"] = df["Date Parse Status"].map(_norm_status)
+
+    # ---------- Source URL must be a valid URI ----------
+    # If empty, set to about:blank (valid uri)
+    df["Source URL"] = df["Source URL"].apply(lambda s: _as_str(s).strip() or "about:blank")
 
     # Column order – canonical first, then the rest
     preferred = [
@@ -172,7 +240,7 @@ def validate_against_schema(rows: List[Dict[str, Any]], schema_path: str) -> Non
     with open(schema_path, "r", encoding="utf-8") as f:
         schema = json.load(f)
 
-    # Validate array of rows
+    # The schema you use is for a single object; validate an array of objects
     jsonschema.validate(instance=rows, schema={"type": "array", "items": schema})
 
 
@@ -198,7 +266,7 @@ def main():
         try:
             validate_against_schema(rows, SCHEMA_PATH)
             print(f"[ok] Schema validation passed for {len(rows)} rows.")
-        except Exception as e:
+        except Exception:
             # Print the first offending row to help debugging
             print("Error:  Schema validation failed. First offending row:", file=sys.stderr)
             try:

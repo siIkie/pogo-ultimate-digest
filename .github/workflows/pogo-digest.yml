@@ -31,7 +31,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            pip install requests beautifulsoup4 lxml pandas openpyxl pyyaml jsonschema scikit-learn joblib python-dateutil icalendar cloudscraper
+            pip install requests beautifulsoup4 lxml pandas openpyxl pyyaml jsonschema scikit-learn joblib python-dateutil icalendar cloudscraper playwright
           fi
 
       - name: Install Playwright browsers (Chromium only)
@@ -48,7 +48,7 @@ jobs:
           echo "START=2024-06-01" >> "$GITHUB_OUTPUT"
           echo "END=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      # --- Core library builders (existing scripts) ---
+      # --- Core library builders ---
       - name: Build events
         run: python build_pogo_library.py
 
@@ -63,6 +63,7 @@ jobs:
 
       # --- Scrapers + sanity checks ---
       - name: Scrape PvE Attackers (ALL 18 TYPES)
+        shell: bash
         run: |
           python scrapers/pve_attackers.py
           test -s pogo_library/attackers/index.json
@@ -81,6 +82,7 @@ print("attackers ok:", len(attackers))
 PY
 
       - name: Scrape PvP Rankings (PvPoke)
+        shell: bash
         run: |
           python scrapers/pvp_rankings.py
           test -s pogo_library/pvp/index.json

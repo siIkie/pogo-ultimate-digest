@@ -35,6 +35,14 @@ jobs:
             pip install requests beautifulsoup4 lxml pandas openpyxl pyyaml jsonschema scikit-learn joblib python-dateutil icalendar cloudscraper playwright
           fi
 
+      - name: Build PvPoke data (pvp_full.json)
+        run: |
+          python pull_and_build_pvp_full.py --output outputs/pvp_full.json
+
+      - name: Scrape PvP Rankings (consume PvPoke JSON)
+        run: |
+          python scrapers/pvp_rankings.py --community-input outputs/pvp_full.json
+          test -s pogo_library/pvp/index.json
       - name: Install Playwright browsers (Chromium only)
         run: |
           python -m playwright install --with-deps chromium

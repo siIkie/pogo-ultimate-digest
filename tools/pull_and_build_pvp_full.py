@@ -3,10 +3,10 @@
 """
 pull_and_build_pvp_full.py
 
-Clones PvPoke, runs its Node.js build, and combines ALL league/cup JSONs
-into a single outputs/pvp_full.json file (per-league lists, with cup notes).
+Clones PvPoke into a temp dir, installs deps, runs PvPoke's Node build,
+and combines ALL league/cup JSONs into one outputs/pvp_full.json.
 
-Output shape (league-keyed lists):
+Output (league-keyed lists):
 {
   "_meta": {...},
   "little": [ { name, form, league, cp_cap, fast_move, charge_move_1, charge_move_2,
@@ -17,12 +17,12 @@ Output shape (league-keyed lists):
 }
 """
 
-import subprocess
-import sys
-import shutil
-import tempfile
 import json
 import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -35,20 +35,14 @@ LEAGUE_CP = {
     "master": 10000,  # PvPoke uses 10000 for open Master
 }
 
+# --------------- utils ----------------
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def run(cmd, cwd=None):
     print("[cmd]", " ".join(cmd))
     subprocess.run(cmd, cwd=cwd, check=True)
-
-def build_pvpoke(tmpdir: str) -> None:
-    print("[info] Cloning PvPoke…")
-    run(["git", "clone", "--depth=1", REPO_URL, tmpdir])
-    print("[info] Installing PvPoke deps…")
-    run(["npm", "install"], cwd=tmpdir)
-    print("[info] Building PvPoke (node build.js)…")
-    run(["node", "build.js"], cwd=tmpdir)
 
 def read_json(path: pathlib.Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -65,8 +59,47 @@ def second_str(x) -> str:
         return str(x[1])
     return ""
 
+# --------------- build PvPoke ----------------
+
+def build_pvpoke(tmpdir: str) -> str:
+    """
+    Clone PvPoke into tmpdir/pvpoke and run npm install + build.
+    Returns the repo path that contains package.json.
+    """
+    repo_dir = pathlib.Path(tmpdir) / "pvpoke"
+    print("[info] Cloning PvPoke…")
+    run(["git", "clone", "--depth=1", REPO_URL, str(repo_dir)])
+
+    pkg = repo_dir / "package.json"
+    if not pkg.exists():
+        print("[error] package.json not found in:", repo_dir)
+        try:
+            print("[debug] ls of repo_dir:")
+            for p in repo_dir.iterdir():
+                print("  -", p.name)
+        except Exception:
+            pass
+        raise SystemExit("PvPoke clone missing package.json — aborting.")
+
+    print("[info] Installing PvPoke deps…")
+    lock = repo_dir / "package-lock.json"
+    if lock.exists():
+        try:
+            run(["npm", "ci"], cwd=str(repo_dir))
+        except subprocess.CalledProcessError:
+            print("[warn] npm ci failed; falling back to npm install")
+            run(["npm", "install"], cwd=str(repo_dir))
+    else:
+        run(["npm", "install"], cwd=str(repo_dir))
+
+    print("[info] Building PvPoke (node build.js)…")
+    run(["node", "build.js"], cwd=str(repo_dir))
+    return str(repo_dir)
+
+# --------------- normalize rows ----------------
+
 def norm_row(e: Dict[str, Any], league_key: str, cp_cap: int, url: str, rank: int, cup: str) -> Dict[str, Any]:
-    """Normalize a PvPoke row into your pipeline fields (defensive on field names)."""
+    """Normalize a PvPoke row into pipeline fields (defensive on field names)."""
     name = (
         e.get("speciesName")
         or e.get("name")
@@ -112,9 +145,11 @@ def norm_row(e: Dict[str, Any], league_key: str, cp_cap: int, url: str, rank: in
         "ts": now_iso(),
     }
 
+# --------------- collect cups/leagues ----------------
+
 def collect_all_cups_for_league(pvpoke_root: pathlib.Path, league: str, cp_cap: int) -> List[Dict[str, Any]]:
     """
-    PvPoke stores JSON here: data/rankings/all/<CP>/<cup>.json
+    PvPoke stores JSON: data/rankings/all/<CP>/<cup>.json
     We'll ingest ALL *.json cups (including 'overall.json') for this league.
     """
     cup_dir = pvpoke_root / "data" / "rankings" / "all" / str(cp_cap)
@@ -123,14 +158,13 @@ def collect_all_cups_for_league(pvpoke_root: pathlib.Path, league: str, cp_cap: 
         return []
 
     rows_out: List[Dict[str, Any]] = []
-    # Deterministic order: sort filenames (overall first, then others)
-    files = sorted([p for p in cup_dir.glob("*.json") if p.is_file()], key=lambda p: (p.name != "overall.json", p.name))
+    files = sorted([p for p in cup_dir.glob("*.json") if p.is_file()],
+                   key=lambda p: (p.name != "overall.json", p.name))
 
     for jf in files:
         cup = jf.stem  # 'overall', 'halloween', etc.
         url_hint = f"https://pvpoke.com/rankings/all/{cp_cap}/{cup}/"
         raw = read_json(jf)
-        # Typical PvPoke shape: list, but handle dict with "data"
         if isinstance(raw, dict) and isinstance(raw.get("data"), list):
             entries = raw["data"]
         elif isinstance(raw, list):
@@ -148,8 +182,7 @@ def collect_all_cups_for_league(pvpoke_root: pathlib.Path, league: str, cp_cap: 
 
         print(f"[ok] {league}/{cup}: +{len(entries)} rows")
 
-    # Sort by (cup then rank) to keep groupings tidy
-    rows_out.sort(key=lambda r: (r.get("notes",""), r.get("rank", 999999), r.get("name","").lower()))
+    rows_out.sort(key=lambda r: (r.get("notes", ""), r.get("rank", 999999), r.get("name", "").lower()))
     return rows_out
 
 def combine_all_leagues(pvpoke_root: str) -> Dict[str, List[Dict[str, Any]]]:
@@ -163,17 +196,18 @@ def combine_all_leagues(pvpoke_root: str) -> Dict[str, List[Dict[str, Any]]]:
     print(f"[info] total combined rows across leagues: {total}")
     return combined
 
+# --------------- main ----------------
+
 def main():
-    # Quick & simple flag parsing for --output
+    # parse --output
     out_idx = sys.argv.index("--output") + 1 if "--output" in sys.argv else -1
     out_path = sys.argv[out_idx] if out_idx > 0 else "outputs/pvp_full.json"
 
     tmpdir = tempfile.mkdtemp(prefix="pvpoke-")
     try:
-        build_pvpoke(tmpdir)
-        combined = combine_all_leagues(tmpdir)
+        repo_path = build_pvpoke(tmpdir)               # returns path with package.json
+        combined = combine_all_leagues(repo_path)      # use repo_path, not tmpdir
 
-        # minimal sanity: at least one league populated
         if not any(len(v) for v in combined.values()):
             raise SystemExit("No leagues produced any rows. Did build.js complete successfully?")
 
@@ -182,7 +216,7 @@ def main():
                 "generated_at": now_iso(),
                 "source": "pvpoke (auto build)",
                 "leagues": list(LEAGUE_CP.keys()),
-                "cups": "all",  # includes 'overall' and any seasonal cups found
+                "cups": "all",
             },
             **combined,
         }

@@ -46,7 +46,7 @@ def build_pvpoke(tmpdir: str) -> None:
     print("[info] Cloning PvPoke…")
     run(["git", "clone", "--depth=1", REPO_URL, tmpdir])
     print("[info] Installing PvPoke deps…")
-    run(["npm", "ci"], cwd=tmpdir)
+    run(["npm", "install"], cwd=tmpdir)
     print("[info] Building PvPoke (node build.js)…")
     run(["node", "build.js"], cwd=tmpdir)
 
